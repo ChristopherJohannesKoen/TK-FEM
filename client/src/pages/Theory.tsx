@@ -192,6 +192,7 @@ export default function Theory() {
             <p><strong className="text-foreground">Transport system:</strong></p>
             <MathBlock>∂w/∂x = A_x w,   ∂w/∂y = A_y w</MathBlock>
             <p>where A_x, A_y encode the constitutive law and equilibrium equations through the 2D elastic Lamé parameters:</p>
+            <p>The codebase currently implements the constant homogeneous-isotropic benchmark operators shown below. The broader Koenian geometry-connection operator family discussed in the paper is still outside the current solver scope.</p>
             <MathBlock>λ_2D = Eν/(1-ν²)  [plane stress],   λ_2D = Eν/((1+ν)(1-2ν))  [plane strain],   μ = E/(2(1+ν))</MathBlock>
             <MathBlock>{`A_x = [[0,0,1,0,0,0],
         [0,0,0,1,0,0],
