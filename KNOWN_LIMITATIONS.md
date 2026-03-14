@@ -6,17 +6,19 @@ The current solver now uses a transport-based, boundary-only TK assembly for the
 
 Current gaps:
 
-- the homogeneous isotropic Appendix A transport operators are now implemented for the benchmark solver family, but the broader Koenian geometry-connection treatment for curved, heterogeneous, or anisotropic media is still outside the current solver scope
-- the meshed quarter-hole benchmark now uses a curvilinear map with an exact circular hole boundary, but there is still no general curved CAD/NURBS meshing pipeline beyond the built-in benchmark geometry family
+- the current meshed transport family is the flat commuting affine benchmark lift; it gives the homogeneous-isotropic `m=1` closure claimed by the theory draft, but it is still not the full higher-order Appendix A/B operator family
+- the meshed quarter-hole benchmark has been moved back to a body-fitted polygonal hole boundary until the geometric connection `A_g` is implemented; exact curved meshed transport is still out of scope
+- because the meshed benchmark path is still an affine `TK-Q4-edge` family, stress-concentration accuracy on the circular-hole benchmark is still limited and should not be treated as a fully converged reference solution
 - the frontend and backend currently implement the `TK-Q4-edge` style workflow; higher-order edge enrichments such as the `TK-Q8-edge` variant are not yet present
 - the convergence study is generated from actual in-app benchmark solves, but it is still limited to the built-in structured mesh family rather than an external Gmsh/photoelastic validation pipeline
-- the functionized single-domain mode is currently implemented for the built-in analytic geometries only; there is no general CAD/NURBS import and no arbitrary geometry functionation pipeline yet
-- the functionized circle-hole mode now runs through the single-domain boundary solver for the Kirsch uniform-tension benchmark, but its conditioning and SCF accuracy are still resolution-sensitive; other circular-hole load cases should still use the meshed solver path
+- the functionized single-domain mode now uses a direct boundary-integral collocation solve on the built-in analytic geometries, but there is still no general CAD/NURBS import and no arbitrary geometry functionation pipeline yet
+- the functionized circle-hole mode now uses a BIE/DtN-style boundary solve plus boundary-kinematic SCF extraction for the Kirsch uniform-tension benchmark, but its conditioning and SCF accuracy are still resolution-sensitive; other circular-hole load cases should still use the meshed solver path
 
 ## Magnus Analysis
 
 - the SymPy-backed Lie-algebra closure path still requires Python plus `sympy`; without that environment the backend falls back to numeric screening
-- with the constitutive-coupled Appendix A transport operators in place, finite Magnus closure is no longer assumed a priori; the current implementation relies on symbolic or numeric closure detection and falls back to truncation when the assembled operator pair is not nilpotent
+- for the current homogeneous-isotropic meshed benchmark transport, the implemented operator pair is flat and abelian, so the closure check should report exact finite Magnus closure with `m=1`
+- the broader non-abelian Magnus cases from the theory draft still remain future work; once curved-geometry connections or richer transport operators are added, closure will again need symbolic or numeric screening
 
 ## Scope
 

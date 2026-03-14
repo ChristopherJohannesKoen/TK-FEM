@@ -129,9 +129,9 @@ export interface SolverParams {
 
 export interface FunctionizedDiagnostics {
   boundaryFrameCount: number;
-  sourcePointCount: number;
+  boundaryElementCount: number;
   boundaryQuadratureOrder: number;
-  sourceOffset: number;
+  systemConditionEstimate: number;
   maxBoundaryResidual: number;
   rmsBoundaryResidual: number;
 }

@@ -191,22 +191,21 @@ export default function Theory() {
             <MathBlock>w(x,y) = [u_x, u_y, ∂_x u_x, ∂_x u_y, ∂_y u_x, ∂_y u_y]ᵀ ∈ ℝ⁶</MathBlock>
             <p><strong className="text-foreground">Transport system:</strong></p>
             <MathBlock>∂w/∂x = A_x w,   ∂w/∂y = A_y w</MathBlock>
-            <p>where A_x, A_y encode the constitutive law and equilibrium equations through the 2D elastic Lamé parameters:</p>
-            <p>The codebase currently implements the constant homogeneous-isotropic benchmark operators shown below. The broader Koenian geometry-connection operator family discussed in the paper is still outside the current solver scope.</p>
-            <MathBlock>λ_2D = Eν/(1-ν²)  [plane stress],   λ_2D = Eν/((1+ν)(1-2ν))  [plane strain],   μ = E/(2(1+ν))</MathBlock>
+            <p>For the current benchmark implementation, A_x and A_y are the flat commuting transport generators of the affine homogeneous-isotropic subspace.</p>
+            <p>The broader Koenian geometry-connection operator family discussed in the paper remains a theory target rather than the current runtime implementation.</p>
             <MathBlock>{`A_x = [[0,0,1,0,0,0],
         [0,0,0,1,0,0],
-        [0,0,0,0,-μ/(λ_2D+2μ),-(λ_2D+μ)/(λ_2D+2μ)],
-        [0,0,0,0,-(λ_2D+μ)/μ,-(λ_2D+2μ)/μ],
+        [0,0,0,0,0,0],
+        [0,0,0,0,0,0],
         [0,0,0,0,0,0],
         [0,0,0,0,0,0]]`}</MathBlock>
             <MathBlock>{`A_y = [[0,0,0,0,1,0],
         [0,0,0,0,0,1],
         [0,0,0,0,0,0],
         [0,0,0,0,0,0],
-        [0,0,-μ/(λ_2D+2μ),-(λ_2D+μ)/(λ_2D+2μ),0,0],
-        [0,0,-(λ_2D+μ)/μ,-(λ_2D+2μ)/μ,0,0]]`}</MathBlock>
-            <p>For homogeneous isotropic elasticity these matrices are constant, so the benchmark transport remains flat and the straight-path Magnus generator reduces to the exponential of a constant operator.</p>
+        [0,0,0,0,0,0],
+        [0,0,0,0,0,0]]`}</MathBlock>
+            <p>For homogeneous isotropic elasticity these generators commute, so [A_x, A_y] = 0, the lower-central-series closure is abelian with m=1, and the benchmark Magnus generator reduces to the exact first-term exponential.</p>
           </Section>
 
           <Section title="Path-Parameterized Transport" sub="Along smooth paths γ(s) within an element">
@@ -252,7 +251,7 @@ export default function Theory() {
             <MathBlock>{'Ω_{m+1}(s) = Ω_{m+2}(s) = ... = 0'}</MathBlock>
             <p>and the Magnus series becomes a finite sum:</p>
             <MathBlock>{'Ω(s) = Σk=1..m Ωk(s)   [finite!]'}</MathBlock>
-            <p>This is the <strong className="text-foreground">closure property central to Koenian Calculus</strong>. For homogeneous isotropic elasticity on rectangular elements, this condition is satisfied (m=1 or m=2), yielding exact intra-element fields without any truncation error.</p>
+            <p>This is the <strong className="text-foreground">closure property central to Koenian Calculus</strong>. For the current homogeneous isotropic benchmark transport used in the code, the closure class is m=1.</p>
           </Section>
 
           <Section title="Intra-Element Field Recovery" sub="Displacement, strain, and stress from the Magnus solution">
@@ -261,9 +260,9 @@ export default function Theory() {
             <p>where Π = [I₂ₓ₂, 0₂ₓ₄] extracts the first two components of the augmented state.</p>
             <p><strong className="text-foreground">Key properties of this field:</strong></p>
             <ul className="list-disc pl-4 space-y-1">
-              <li><strong className="text-foreground">Strong PDE satisfaction:</strong> ∇·σ(u) = 0 pointwise in Ω_e</li>
+              <li><strong className="text-foreground">Strong PDE satisfaction within the implemented benchmark subspace:</strong> constant-stress affine fields satisfy ∇·σ(u) = 0 pointwise in Ω_e</li>
               <li><strong className="text-foreground">No interior interpolation:</strong> Field generated from boundary state w₀</li>
-              <li><strong className="text-foreground">No Gauss quadrature:</strong> Exact for closed cases with constant A_x, A_y</li>
+              <li><strong className="text-foreground">Boundary-only assembly:</strong> the meshed solver assembles through boundary integrals from a boundary reference state rather than interior interpolation</li>
               <li><strong className="text-foreground">Direct stress access:</strong> ∂_x u and ∂_y u available directly from w — no numerical differentiation</li>
             </ul>
             <p><strong className="text-foreground">Stress recovery:</strong></p>

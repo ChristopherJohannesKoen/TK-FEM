@@ -19,18 +19,6 @@ interface Node {
   y: number;
 }
 
-interface QuarterHoleElementGeometry {
-  type: "quarter_hole";
-  W: number;
-  H: number;
-  holeRadius: number;
-  thetaCorner: number;
-  thetaStart: number;
-  thetaEnd: number;
-  radialStart: number;
-  radialEnd: number;
-}
-
 interface ElementPointData {
   x: number;
   y: number;
@@ -45,7 +33,6 @@ interface Element {
   nodeIds: [number, number, number, number];
   center: Vec2;
   characteristicSize: number;
-  geometry?: QuarterHoleElementGeometry;
 }
 
 interface Mesh {
@@ -66,7 +53,8 @@ interface ConstitutiveData {
 interface ElementRecovery {
   elementId: number;
   element: Element;
-  boundaryProjection: DenseMatrix;
+  referencePoint: Vec2;
+  stateProjection: DenseMatrix;
 }
 
 interface FieldState {
@@ -288,46 +276,18 @@ function computeStress(constitutive: ConstitutiveData, state: number[]) {
   };
 }
 
-function transportElasticParameters(E: number, nu: number, planeType: "plane_stress" | "plane_strain") {
-  const mu = E / (2 * (1 + nu));
-
-  if (planeType === "plane_stress") {
-    return {
-      lambda2D: E * nu / (1 - nu * nu),
-      mu,
-    };
-  }
-
-  return {
-    lambda2D: E * nu / ((1 + nu) * (1 - 2 * nu)),
-    mu,
-  };
-}
-
 function buildTransportOperators(E: number, nu: number, planeType: "plane_stress" | "plane_strain"): TransportOperators {
   const n = 6;
   const Ax = matZero(n);
   const Ay = matZero(n);
-  const { lambda2D, mu } = transportElasticParameters(E, nu, planeType);
-  const lambdaPlus2Mu = lambda2D + 2 * mu;
-  const lambdaPlusMu = lambda2D + mu;
+  void E;
+  void nu;
+  void planeType;
 
   matSet(Ax, n, 0, 2, 1);
   matSet(Ax, n, 1, 3, 1);
   matSet(Ay, n, 0, 4, 1);
   matSet(Ay, n, 1, 5, 1);
-
-  // Appendix A transport lift for the homogeneous isotropic 2D benchmark family.
-  // State ordering: [ux, uy, dux/dx, duy/dx, dux/dy, duy/dy].
-  matSet(Ax, n, 2, 4, -mu / lambdaPlus2Mu);
-  matSet(Ax, n, 2, 5, -lambdaPlusMu / lambdaPlus2Mu);
-  matSet(Ax, n, 3, 4, -lambdaPlusMu / mu);
-  matSet(Ax, n, 3, 5, -lambdaPlus2Mu / mu);
-
-  matSet(Ay, n, 4, 2, -mu / lambdaPlus2Mu);
-  matSet(Ay, n, 4, 3, -lambdaPlusMu / lambdaPlus2Mu);
-  matSet(Ay, n, 5, 2, -lambdaPlusMu / mu);
-  matSet(Ay, n, 5, 3, -lambdaPlus2Mu / mu);
 
   return { Ax, Ay, n };
 }
@@ -375,20 +335,6 @@ function outerBoundaryPoint(W: number, H: number, thetaCorner: number, theta: nu
   return Math.abs(theta - Math.PI / 2) < tolerance ? [0, H] : [H / Math.tan(theta), H];
 }
 
-function outerBoundaryDerivative(W: number, H: number, thetaCorner: number, theta: number): Vec2 {
-  const tolerance = 1e-9;
-  if (theta <= thetaCorner + tolerance) {
-    if (Math.abs(theta) < tolerance) {
-      return [0, W];
-    }
-    return [0, W / (Math.cos(theta) * Math.cos(theta))];
-  }
-  if (Math.abs(theta - Math.PI / 2) < tolerance) {
-    return [-H, 0];
-  }
-  return [-H / (Math.sin(theta) * Math.sin(theta)), 0];
-}
-
 function mapQuarterHoleByParameters(
   W: number,
   H: number,
@@ -403,31 +349,6 @@ function mapQuarterHoleByParameters(
     inner[0] + radialFraction * (outer[0] - inner[0]),
     inner[1] + radialFraction * (outer[1] - inner[1]),
   ];
-}
-
-function quarterHolePointAndDerivatives(geometry: QuarterHoleElementGeometry, xi: number, eta: number): ElementPointData {
-  const radialFraction = interpolateReference(geometry.radialStart, geometry.radialEnd, xi);
-  const theta = interpolateReference(geometry.thetaStart, geometry.thetaEnd, eta);
-  const dRadialDxi = 0.5 * (geometry.radialEnd - geometry.radialStart);
-  const dThetaDeta = 0.5 * (geometry.thetaEnd - geometry.thetaStart);
-  const inner: Vec2 = [geometry.holeRadius * Math.cos(theta), geometry.holeRadius * Math.sin(theta)];
-  const innerDerivative: Vec2 = [-geometry.holeRadius * Math.sin(theta), geometry.holeRadius * Math.cos(theta)];
-  const outer = outerBoundaryPoint(geometry.W, geometry.H, geometry.thetaCorner, theta);
-  const outerDerivative = outerBoundaryDerivative(geometry.W, geometry.H, geometry.thetaCorner, theta);
-  const radialDirection: Vec2 = [outer[0] - inner[0], outer[1] - inner[1]];
-  const angularDirection: Vec2 = [
-    innerDerivative[0] + radialFraction * (outerDerivative[0] - innerDerivative[0]),
-    innerDerivative[1] + radialFraction * (outerDerivative[1] - innerDerivative[1]),
-  ];
-
-  return {
-    x: inner[0] + radialFraction * radialDirection[0],
-    y: inner[1] + radialFraction * radialDirection[1],
-    dxDxi: radialDirection[0] * dRadialDxi,
-    dyDxi: radialDirection[1] * dRadialDxi,
-    dxDeta: angularDirection[0] * dThetaDeta,
-    dyDeta: angularDirection[1] * dThetaDeta,
-  };
 }
 
 function bilinearPointAndDerivatives(element: Element, nodes: Node[], xi: number, eta: number): ElementPointData {
@@ -461,9 +382,6 @@ function bilinearPointAndDerivatives(element: Element, nodes: Node[], xi: number
 }
 
 function elementPointAndDerivatives(element: Element, nodes: Node[], xi: number, eta: number) {
-  if (element.geometry?.type === "quarter_hole") {
-    return quarterHolePointAndDerivatives(element.geometry, xi, eta);
-  }
   return bilinearPointAndDerivatives(element, nodes, xi, eta);
 }
 
@@ -528,9 +446,6 @@ function classifyBoundaryEdge(
   params: Pick<SolverParams, "domainType" | "W" | "H" | "holeRadius">,
 ) {
   const tolerance = 1e-6;
-  if (element.geometry?.type === "quarter_hole" && edgeIndex === 3 && element.geometry.radialStart <= 1e-12) {
-    return "hole";
-  }
   const [nodeAIndex, nodeBIndex] = EDGE_NODE_INDICES[edgeIndex];
   const nodeA = nodes[element.nodeIds[nodeAIndex]];
   const nodeB = nodes[element.nodeIds[nodeBIndex]];
@@ -574,6 +489,11 @@ function tractionForBoundary(boundaryType: string, params: Pick<SolverParams, "l
     return [params.loadMag, 0];
   }
   return null;
+}
+
+function elementBoundaryReferencePoint(element: Element, nodes: Node[]): Vec2 {
+  const point = edgePointAndNormal(element, nodes, 0, 0);
+  return [point.x, point.y];
 }
 
 function computeBasisAtPoint(
@@ -703,17 +623,6 @@ function generateQuarterHoleMesh(W: number, H: number, holeRadius: number, nx: n
         ],
         center: [0, 0],
         characteristicSize: 0,
-        geometry: {
-          type: "quarter_hole",
-          W,
-          H,
-          holeRadius,
-          thetaCorner,
-          thetaStart: angles[angleIndex],
-          thetaEnd: angles[angleIndex + 1],
-          radialStart: radialFractions[radialIndex],
-          radialEnd: radialFractions[radialIndex + 1],
-        },
       };
       provisional.center = buildElementCenter(provisional, nodes);
       provisional.characteristicSize = characteristicSize(provisional, nodes);
@@ -737,19 +646,25 @@ function buildTKElementMatrices(
   transport: TransportOperators,
   constitutive: ConstitutiveData,
 ) {
-  const boundarySamples = zeroMatrix(8, transport.n);
+  const referencePoint = elementBoundaryReferencePoint(element, mesh.nodes);
+  const M = zeroMatrix(transport.n, transport.n);
+  const G = zeroMatrix(transport.n, 8);
   const fe = new Array(8).fill(0);
 
-  element.nodeIds.forEach((nodeId, localIndex) => {
-    const node = mesh.nodes[nodeId];
-    const U = displacementBasisAtPoint([node.x, node.y], element.center, transport);
-    for (let column = 0; column < transport.n; column++) {
-      boundarySamples[localIndex * 2][column] = U[0][column];
-      boundarySamples[localIndex * 2 + 1][column] = U[1][column];
+  for (let edgeIndex = 0; edgeIndex < EDGE_NODE_INDICES.length; edgeIndex++) {
+    for (let gpIndex = 0; gpIndex < LINE_GAUSS_POINTS.length; gpIndex++) {
+      const s = LINE_GAUSS_POINTS[gpIndex];
+      const weight = LINE_GAUSS_WEIGHTS[gpIndex];
+      const edgeData = edgePointAndNormal(element, mesh.nodes, edgeIndex, s);
+      const N = boundaryShapeMatrix(edgeIndex, s);
+      const scale = weight * edgeData.measure;
+      const U = displacementBasisAtPoint([edgeData.x, edgeData.y], referencePoint, transport);
+      addScaled(M, multiplyDense(transpose(U), U), scale);
+      addScaled(G, multiplyDense(transpose(U), N), scale);
     }
-  });
+  }
 
-  const boundaryProjection = pseudoInverse(boundarySamples);
+  const stateProjection = multiplyDense(pseudoInverse(M), G);
   const Ke = zeroMatrix(8, 8);
 
   for (let edgeIndex = 0; edgeIndex < EDGE_NODE_INDICES.length; edgeIndex++) {
@@ -762,14 +677,14 @@ function buildTKElementMatrices(
       const edgeData = edgePointAndNormal(element, mesh.nodes, edgeIndex, s);
       const basis = computeBasisAtPoint(
         [edgeData.x, edgeData.y],
-        element.center,
+        referencePoint,
         edgeData.normal,
         transport,
         constitutive,
       );
       const N = boundaryShapeMatrix(edgeIndex, s);
       const scale = weight * edgeData.measure;
-      addScaled(Ke, multiplyDense(transpose(N), multiplyDense(basis.Q, boundaryProjection)), scale);
+      addScaled(Ke, multiplyDense(transpose(N), multiplyDense(basis.Q, stateProjection)), scale);
 
       if (traction) {
         const loadContribution = multiplyDenseVector(transpose(N), traction);
@@ -788,7 +703,8 @@ function buildTKElementMatrices(
     recovery: {
       elementId: element.id,
       element,
-      boundaryProjection,
+      referencePoint,
+      stateProjection,
     } satisfies ElementRecovery,
   };
 }
@@ -1025,8 +941,12 @@ function evaluateTKFieldAtPoint(
   y: number,
 ): FieldState {
   const q = recovery.element.nodeIds.flatMap((nodeId) => [displacements[nodeId * 2] ?? 0, displacements[nodeId * 2 + 1] ?? 0]);
-  const coefficients = multiplyDenseVector(recovery.boundaryProjection, q);
-  const state = matVecMul(transportMatrix(transport, x - recovery.element.center[0], y - recovery.element.center[1]), coefficients, transport.n);
+  const coefficients = multiplyDenseVector(recovery.stateProjection, q);
+  const state = matVecMul(
+    transportMatrix(transport, x - recovery.referencePoint[0], y - recovery.referencePoint[1]),
+    coefficients,
+    transport.n,
+  );
   const stress = computeStress(constitutive, state);
 
   return {
@@ -1193,7 +1113,7 @@ function buildHoleBoundarySamplesStandard(
 
 function buildHoleGeometryOutlineTK(
   mesh: Mesh,
-  params: Pick<SolverParams, "domainType" | "holeRadius">,
+  params: Pick<SolverParams, "domainType" | "W" | "H" | "holeRadius">,
   displacements: number[],
   recoveries: Map<number, ElementRecovery>,
   transport: TransportOperators,
@@ -1203,42 +1123,61 @@ function buildHoleGeometryOutlineTK(
     return [] as SolverResults["geometryOutline"];
   }
 
-  const holeElements = mesh.elements
-    .filter((element) => element.geometry?.type === "quarter_hole" && element.geometry.radialStart <= 1e-12)
-    .sort((left, right) => (left.geometry?.thetaStart ?? 0) - (right.geometry?.thetaStart ?? 0));
-  const outline: SolverResults["geometryOutline"] = [];
+  const outline: Array<SolverResults["geometryOutline"][number] & { theta: number }> = [];
 
-  holeElements.forEach((element, elementIndex) => {
+  mesh.elements.forEach((element) => {
     const recovery = recoveries.get(element.id);
-    const geometry = element.geometry;
-    if (!recovery || geometry?.type !== "quarter_hole") {
+    if (!recovery) {
       return;
     }
 
-    const sampleCount = Math.max(8, Math.ceil(((geometry.thetaEnd - geometry.thetaStart) / (Math.PI / 2)) * 24));
-    for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex++) {
-      if (elementIndex > 0 && sampleIndex === 0) {
+    for (let edgeIndex = 0; edgeIndex < EDGE_NODE_INDICES.length; edgeIndex++) {
+      if (classifyBoundaryEdge(element, mesh.nodes, edgeIndex, params) !== "hole") {
         continue;
       }
-      const eta = -1 + (2 * sampleIndex) / Math.max(sampleCount, 1);
-      const point = elementPointAndDerivatives(element, mesh.nodes, -1, eta);
-      const theta = Math.atan2(point.y, point.x);
-      const field = evaluateTKFieldAtPoint(recovery, displacements, transport, constitutive, point.x, point.y);
-      const arcLength = params.holeRadius * theta;
-      outline.push({
-        x: point.x,
-        y: point.y,
-        ux: field.ux,
-        uy: field.uy,
-        boundaryType: "hole",
-        curveLabel: "Exact hole boundary",
-        arcLength,
-        normalizedArcLength: theta / (Math.PI / 2),
-      });
+
+      const sampleCount = Math.max(4, mesh.elements.length > 40 ? 2 : 3);
+      for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex++) {
+        const s = -1 + (2 * sampleIndex) / Math.max(sampleCount, 1);
+        const edgeData = edgePointAndNormal(element, mesh.nodes, edgeIndex, s);
+        const theta = Math.atan2(edgeData.y, edgeData.x);
+        const field = evaluateTKFieldAtPoint(recovery, displacements, transport, constitutive, edgeData.x, edgeData.y);
+        outline.push({
+          x: edgeData.x,
+          y: edgeData.y,
+          ux: field.ux,
+          uy: field.uy,
+          boundaryType: "hole",
+          curveLabel: "Meshed hole boundary",
+          arcLength: params.holeRadius * theta,
+          normalizedArcLength: theta / (Math.PI / 2),
+          theta,
+        });
+      }
     }
   });
 
-  return outline;
+  outline.sort((left, right) => left.theta - right.theta);
+
+  const deduped: SolverResults["geometryOutline"] = [];
+  for (const point of outline) {
+    const last = deduped[deduped.length - 1];
+    if (last && Math.hypot(last.x - point.x, last.y - point.y) < 1e-8) {
+      continue;
+    }
+    deduped.push({
+      x: point.x,
+      y: point.y,
+      ux: point.ux,
+      uy: point.uy,
+      boundaryType: point.boundaryType,
+      curveLabel: point.curveLabel,
+      arcLength: point.arcLength,
+      normalizedArcLength: point.normalizedArcLength,
+    });
+  }
+
+  return deduped;
 }
 
 function computeStressErrorNormTK(

@@ -744,12 +744,16 @@ export default function Results() {
               <MetricCard
                 label="Boundary quadrature"
                 value={`${results.functionizedDiagnostics?.boundaryQuadratureOrder ?? "n/a"}`}
-                sublabel="Oversampled enforcement order"
+                sublabel="Boundary integration order"
               />
               <MetricCard
                 label="Boundary residual"
                 value={results.functionizedDiagnostics ? formatValue(results.functionizedDiagnostics.maxBoundaryResidual) : "n/a"}
-                sublabel={results.functionizedDiagnostics ? `RMS ${formatValue(results.functionizedDiagnostics.rmsBoundaryResidual)}` : "No diagnostics"}
+                sublabel={
+                  results.functionizedDiagnostics
+                    ? `RMS ${formatValue(results.functionizedDiagnostics.rmsBoundaryResidual)} · cond ${formatValue(results.functionizedDiagnostics.systemConditionEstimate)}`
+                    : "No diagnostics"
+                }
               />
             </div>
 

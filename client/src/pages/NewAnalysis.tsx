@@ -442,8 +442,8 @@ export default function NewAnalysis() {
                   </div>
                   <div className="rounded bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
                     {watchValues.analysisMode === "functionized"
-                      ? "One exact geometry domain, boundary-only unknowns, no interior element subdivision."
-                      : "Structured body-fitted TK-FEM mesh with transport-based boundary assembly."}
+                      ? "One exact geometry domain, boundary-only unknowns, and a direct boundary-integral solve with no interior element subdivision."
+                      : "Structured body-fitted TK-FEM mesh with flat transport-based boundary assembly."}
                   </div>
                 </div>
 
@@ -556,8 +556,8 @@ export default function NewAnalysis() {
                     {watchValues.analysisMode === "functionized" ? (
                       <p className="mt-2 text-xs text-muted-foreground">
                         {watchValues.domainType === "circle_hole"
-                          ? "Functionized circle-hole mode uses the single-domain boundary solver and is currently validated against the Kirsch uniform-tension benchmark."
-                          : "Functionized mode is restricted to smooth boundary tractions."}
+                          ? "Functionized circle-hole mode uses the direct boundary-integral single-domain solver and is currently validated against the Kirsch uniform-tension benchmark."
+                          : "Functionized mode uses direct boundary-integral collocation and is restricted to smooth boundary tractions."}
                       </p>
                     ) : null}
                   </div>
@@ -601,7 +601,7 @@ export default function NewAnalysis() {
                 {watchValues.analysisMode === "functionized" ? (
                   <div>
                     <div className="mb-1 flex justify-between">
-                      <Label className="text-xs text-muted-foreground">Boundary Quadrature / Oversampling = {watchValues.boundaryQuadratureOrder}</Label>
+                      <Label className="text-xs text-muted-foreground">Boundary Integration Order = {watchValues.boundaryQuadratureOrder}</Label>
                       <span className="text-xs font-mono text-primary">{watchValues.boundaryQuadratureOrder}</span>
                     </div>
                     <Slider
@@ -613,7 +613,7 @@ export default function NewAnalysis() {
                       data-testid="slider-boundary-quadrature"
                     />
                     <div className="mt-2 rounded bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-                      This increases boundary enforcement density in the functionized single-domain solve without creating interior elements.
+                      This increases boundary integration accuracy in the functionized single-domain solve without creating interior elements.
                     </div>
                   </div>
                 ) : null}
