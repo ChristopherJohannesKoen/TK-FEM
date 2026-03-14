@@ -36,6 +36,7 @@ export const analyses = pgTable("analyses", {
   loadType: text("load_type").notNull().default("uniform_tension"), // uniform_tension | point_load | shear
   loadMagnitude: real("load_magnitude").notNull().default(100.0),
   // TK-FEM specific
+  magnusMode: text("magnus_mode").notNull().default("auto"), // auto | manual
   magnusTruncation: integer("magnus_truncation").notNull().default(3),
   // Solver status and results (JSON)
   status: text("status").notNull().default("pending"), // pending | running | complete | error

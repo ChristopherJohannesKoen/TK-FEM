@@ -8,15 +8,19 @@ Prerequisites:
 
 - Node.js 20+ or 22+
 - npm 10+
+- Python 3.11+ recommended for SymPy-backed Magnus closure analysis
 
 Install and run:
 
 ```powershell
 npm.cmd install
+py -m pip install -r requirements.txt
 npm.cmd run dev
 ```
 
 Open `http://localhost:5000`.
+
+If Python or `sympy` is not available, the backend falls back to a numeric Magnus screening path. The application still runs, but the Lie-algebra closure check is less rigorous than the SymPy path.
 
 ## Common Commands
 
@@ -42,6 +46,7 @@ Edit source files here:
 - `client/src` for the React application
 - `server` for the API and solver entrypoints
 - `shared` for contracts used by both sides
+- `python` for SymPy-backed symbolic Magnus analysis
 
 Do not treat these as source files:
 
@@ -59,6 +64,7 @@ Those root files are a generated static snapshot. Refresh them with `npm run exp
 - `shared/schema.ts` storage models
 - `shared/solver.ts` shared solver result contracts
 - `script` build and export scripts
+- `python/magnus_analysis.py` symbolic Magnus closure and convergence analysis
 
 ## Quality Gates
 
@@ -74,4 +80,5 @@ That runs the TypeScript check and production build.
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [DEVELOPMENT.md](./DEVELOPMENT.md)
+- [MAGNUS_ANALYSIS.md](./MAGNUS_ANALYSIS.md)
 - [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md)

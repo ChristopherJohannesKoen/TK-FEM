@@ -1,314 +1,425 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "wouter";
-import { Link } from "wouter";
+import { Link, useParams } from "wouter";
+import { useState } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart as ReLineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useRef } from "react";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import {
+  DeflectionContourCanvas,
+  DeformedShapeCanvas,
+  StressContourCanvas,
+  getDeflectionFieldLabel,
+  getStressFieldLabel,
+} from "@/components/results/field-canvases";
+import { MagnusAnalysisPanel } from "@/components/results/magnus-panel";
 import type { Analysis } from "@shared/schema";
 import type {
+  DeflectionField,
   SolverConvergencePoint,
   SolverNodeResult,
   SolverResults,
   SolverStressResult,
+  StressField,
 } from "@shared/solver";
-import { BarChart3, TrendingUp, Download, ChevronLeft } from "lucide-react";
+import { BarChart3, ChevronLeft, Download, Sigma, Waves } from "lucide-react";
 
-interface ChartPoint {
-  x: number;
-  y: number;
-  series: string;
+interface SeriesInfo {
+  key: string;
+  label: string;
   color: string;
 }
 
-// Simple canvas chart
-function LineChart({ data, title, xLabel, yLabel }: {
-  data: ChartPoint[];
-  title: string; xLabel: string; yLabel: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+interface ChartRow {
+  x: number;
+  [key: string]: number | string | undefined;
+}
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const cw = canvas.width, ch = canvas.height;
-    const pad = { l: 56, r: 24, t: 32, b: 48 };
-    const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+function formatValue(value: number) {
+  const absolute = Math.abs(value);
+  if (absolute === 0) {
+    return "0";
+  }
+  if (absolute >= 1e4 || absolute < 1e-3) {
+    return value.toExponential(3);
+  }
+  if (absolute >= 100) {
+    return value.toFixed(1);
+  }
+  if (absolute >= 1) {
+    return value.toFixed(4);
+  }
+  return value.toFixed(6);
+}
 
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = "hsl(217,33%,14%)";
-    ctx.fillRect(0, 0, cw, ch);
+function getSeriesColor(method: string) {
+  if (method.includes("This Run")) {
+    return "#f97316";
+  }
+  if (method.includes("Standard")) {
+    return "#38bdf8";
+  }
+  return "#f59e0b";
+}
 
-    if (!data.length) return;
+function buildPivotedChartData(
+  points: SolverConvergencePoint[],
+  selectValue: (point: SolverConvergencePoint) => number,
+) {
+  const rowsByX = new Map<number, ChartRow>();
+  const keyByMethod = new Map<string, string>();
+  const series: SeriesInfo[] = [];
 
-    const allX = data.map(d => d.x), allY = data.map(d => d.y);
-    const xMin = Math.min(...allX), xMax = Math.max(...allX);
-    const yMin = 0, yMax = Math.max(...allY) * 1.05;
+  points.forEach((point, index) => {
+    const existingKey = keyByMethod.get(point.method);
+    const key = existingKey ?? `series_${index}`;
 
-    const toCanvas = (x: number, y: number) => ({
-      cx: pad.l + ((x - xMin) / (xMax - xMin || 1)) * pw,
-      cy: pad.t + (1 - (y - yMin) / (yMax - yMin || 1)) * ph,
-    });
-
-    // Grid
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = pad.t + (i / 4) * ph;
-      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
-    }
-    for (let i = 0; i <= 4; i++) {
-      const x = pad.l + (i / 4) * pw;
-      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
-    }
-
-    // Axes
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ph); ctx.lineTo(pad.l + pw, pad.t + ph); ctx.stroke();
-
-    // Draw series
-    const seriesColors = new Map<string, string>();
-    data.forEach(d => seriesColors.set(d.series, d.color));
-
-    for (const [series, color] of Array.from(seriesColors.entries())) {
-      const pts = data.filter(d => d.series === series).sort((a, b) => a.x - b.x);
-      if (pts.length < 2) continue;
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      pts.forEach((p, i) => {
-        const { cx, cy } = toCanvas(p.x, p.y);
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    if (!existingKey) {
+      keyByMethod.set(point.method, key);
+      series.push({
+        key,
+        label: point.method,
+        color: getSeriesColor(point.method),
       });
-      ctx.stroke();
-
-      // Dots
-      ctx.fillStyle = color;
-      for (const p of pts) {
-        const { cx, cy } = toCanvas(p.x, p.y);
-        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 2 * Math.PI); ctx.fill();
-      }
     }
 
-    // Labels
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = "10px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(xLabel, pad.l + pw / 2, ch - 8);
-    ctx.save(); ctx.translate(12, pad.t + ph / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText(yLabel, 0, 0); ctx.restore();
+    const row = rowsByX.get(point.nElem) ?? { x: point.nElem };
+    row[key] = selectValue(point);
+    rowsByX.set(point.nElem, row);
+  });
 
-    // Title
-    ctx.fillStyle = "rgba(255,255,255,0.8)";
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(title, pad.l + pw / 2, 16);
-
-    // Axis tick labels
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "9px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-    for (let i = 0; i <= 4; i++) {
-      const x = xMin + (i / 4) * (xMax - xMin);
-      const { cx } = toCanvas(x, yMin);
-      ctx.fillText(String(Math.round(x)), cx, pad.t + ph + 12);
-    }
-    ctx.textAlign = "right";
-    for (let i = 0; i <= 4; i++) {
-      const y = yMin + (i / 4) * (yMax - yMin);
-      const { cy } = toCanvas(xMin, y);
-      ctx.fillText(y.toFixed(1), pad.l - 6, cy + 3);
-    }
-
-    // Legend
-    let legendX = pad.l + 10;
-    for (const [series, color] of Array.from(seriesColors.entries())) {
-      ctx.fillStyle = color;
-      ctx.fillRect(legendX, pad.t + 4, 12, 4);
-      ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.font = "9px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(series, legendX + 16, pad.t + 10);
-      legendX += 120;
-    }
-  }, [data, title, xLabel, yLabel]);
-
-  return <canvas ref={canvasRef} width={560} height={280} className="w-full rounded-md border border-border" />;
+  return {
+    data: Array.from(rowsByX.values()).sort((left, right) => left.x - right.x),
+    series,
+  };
 }
 
-// Kirsch stress distribution chart
-function KirschChart({ loadMag, holeRadius }: { loadMag: number; holeRadius: number }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+function buildKirschBoundaryData(loadMagnitude: number, scf?: number) {
+  const computedBoundaryStress = typeof scf === "number" ? scf * loadMagnitude : undefined;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const cw = canvas.width, ch = canvas.height;
-    const pad = { l: 56, r: 24, t: 32, b: 48 };
-    const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
-
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = "hsl(217,33%,14%)";
-    ctx.fillRect(0, 0, cw, ch);
-
-    const sigma = loadMag;
-
-    // Generate Kirsch analytical curve
-    const nPts = 100;
-    const analytical: { theta: number; stt: number }[] = [];
-    for (let i = 0; i <= nPts; i++) {
-      const theta = (i / nPts) * Math.PI;
-      const cos2 = Math.cos(2 * theta);
-      const stt = sigma * (1 - 2 * cos2); // Kirsch at r=a: σ_θθ = σ∞(1 - 2cos2θ)
-      analytical.push({ theta: theta * 180 / Math.PI, stt });
-    }
-
-    const allY = analytical.map(p => p.stt);
-    const yMin = Math.min(...allY) - 20, yMax = Math.max(...allY) + 20;
-    const xMin = 0, xMax = 180;
-
-    const toCanvas = (x: number, y: number) => ({
-      cx: pad.l + ((x - xMin) / (xMax - xMin)) * pw,
-      cy: pad.t + (1 - (y - yMin) / (yMax - yMin)) * ph,
-    });
-
-    // Grid
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= 5; i++) {
-      const y = pad.t + (i / 5) * ph;
-      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
-    }
-
-    // Zero line
-    const { cy: cy0 } = toCanvas(0, 0);
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(pad.l, cy0); ctx.lineTo(pad.l + pw, cy0); ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Axes
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ph); ctx.lineTo(pad.l + pw, pad.t + ph); ctx.stroke();
-
-    // Kirsch analytical curve
-    ctx.strokeStyle = "hsl(38,92%,55%)";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    analytical.forEach((p, i) => {
-      const { cx, cy } = toCanvas(p.theta, p.stt);
-      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
-    });
-    ctx.stroke();
-
-    // Max SCF annotation
-    const { cx: scfX, cy: scfY } = toCanvas(90, sigma * 3);
-    ctx.fillStyle = "hsl(38,92%,55%)";
-    ctx.font = "bold 11px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("K_t = 3.0", scfX + 6, scfY);
-
-    // Labels
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = "10px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("θ (degrees)", pad.l + pw / 2, ch - 8);
-    ctx.save(); ctx.translate(12, pad.t + ph / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText("σ_θθ (MPa)", 0, 0); ctx.restore();
-
-    ctx.fillStyle = "rgba(255,255,255,0.8)";
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Kirsch Solution: σ_θθ at r = a (hole boundary)", pad.l + pw / 2, 16);
-
-    // Tick labels
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "9px JetBrains Mono, monospace";
-    ctx.textAlign = "center";
-    for (const x of [0, 30, 60, 90, 120, 150, 180]) {
-      const { cx } = toCanvas(x, yMin);
-      ctx.fillText(String(x) + "°", cx, pad.t + ph + 12);
-    }
-    ctx.textAlign = "right";
-    for (let i = 0; i <= 4; i++) {
-      const y = yMin + (i / 4) * (yMax - yMin);
-      const { cy } = toCanvas(xMin, y);
-      ctx.fillText(y.toFixed(0), pad.l - 6, cy + 3);
-    }
-
-  }, [loadMag, holeRadius]);
-
-  return <canvas ref={canvasRef} width={560} height={280} className="w-full rounded-md border border-border" />;
+  return Array.from({ length: 181 }, (_, theta) => {
+    const radians = (theta * Math.PI) / 180;
+    return {
+      theta,
+      analytical: loadMagnitude * (1 - 2 * Math.cos(2 * radians)),
+      computed: theta === 90 ? computedBoundaryStress : undefined,
+    };
+  });
 }
 
-function NodeTable({ results }: { results: SolverResults }) {
-  const nodes = results.nodes.slice(0, 20);
+function buildStressProfile(results: SolverResults, analysis: Analysis, field: StressField) {
+  if (!results.stresses.length) {
+    return [];
+  }
+
+  const targetY = analysis.domainHeight / 2;
+  const closestY = results.stresses.reduce((best, stress) => {
+    return Math.abs(stress.cy - targetY) < Math.abs(best - targetY) ? stress.cy : best;
+  }, results.stresses[0].cy);
+
+  return results.stresses
+    .filter((stress) => Math.abs(stress.cy - closestY) < 1e-9)
+    .sort((left, right) => left.cx - right.cx)
+    .map((stress) => ({
+      x: stress.cx,
+      value: stress[field],
+    }));
+}
+
+function buildDeflectionProfile(results: SolverResults, field: DeflectionField) {
+  if (!results.nodes.length) {
+    return [];
+  }
+
+  const edgeX = Math.max(...results.nodes.map((node) => node.x));
+  return results.nodes
+    .filter((node) => Math.abs(node.x - edgeX) < 1e-9)
+    .sort((left, right) => left.y - right.y)
+    .map((node) => ({
+      x: node.y,
+      value: node[field],
+    }));
+}
+
+function ChartCard({
+  title,
+  data,
+  series,
+  xLabel,
+  yLabel,
+  referenceLine,
+  footer,
+}: {
+  title: string;
+  data: ChartRow[];
+  series: SeriesInfo[];
+  xLabel: string;
+  yLabel: string;
+  referenceLine?: { y: number; label: string };
+  footer?: string;
+}) {
+  const chartConfig = Object.fromEntries(
+    series.map((entry) => [
+      entry.key,
+      {
+        label: entry.label,
+        color: entry.color,
+      },
+    ]),
+  );
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
-        <thead>
-          <tr className="border-b border-border text-muted-foreground">
-            {["Node", "x", "y", "u_x", "u_y", "|u|"].map(h => (
-              <th key={h} className="text-left py-2 px-2">{h}</th>
+    <Card className="border-border bg-card">
+      <CardHeader className="pb-2 pt-4">
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ChartContainer config={chartConfig} className="h-[300px] w-full">
+          <ReLineChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 12 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="x"
+              tickLine={false}
+              axisLine={false}
+              label={{ value: xLabel, position: "insideBottom", offset: -4 }}
+            />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              width={80}
+              label={{ value: yLabel, angle: -90, position: "insideLeft" }}
+            />
+            <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+            <ChartLegend content={<ChartLegendContent />} />
+            {referenceLine ? (
+              <ReferenceLine
+                y={referenceLine.y}
+                stroke="#94a3b8"
+                strokeDasharray="4 4"
+                ifOverflow="extendDomain"
+                label={{ value: referenceLine.label, fill: "#94a3b8", fontSize: 12 }}
+              />
+            ) : null}
+            {series.map((entry) => (
+              <Line
+                key={entry.key}
+                type="monotone"
+                dataKey={entry.key}
+                name={entry.label}
+                stroke={`var(--color-${entry.key})`}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+                connectNulls
+              />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {nodes.map((node: SolverNodeResult) => (
-            <tr key={node.id} className="border-b border-border/40 hover:bg-secondary/30">
-              <td className="py-1.5 px-2 text-muted-foreground">{node.id}</td>
-              <td className="py-1.5 px-2">{node.x.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{node.y.toFixed(3)}</td>
-              <td className="py-1.5 px-2 text-primary">{node.ux.toExponential(3)}</td>
-              <td className="py-1.5 px-2 text-primary">{node.uy.toExponential(3)}</td>
-              <td className="py-1.5 px-2 text-accent">{Math.sqrt(node.ux ** 2 + node.uy ** 2).toExponential(3)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {results.nodes.length > 20 && (
-        <div className="text-xs text-muted-foreground p-2">... {results.nodes.length - 20} more nodes</div>
-      )}
+          </ReLineChart>
+        </ChartContainer>
+        {footer ? <p className="mt-3 text-xs text-muted-foreground">{footer}</p> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SingleSeriesChart({
+  title,
+  data,
+  xLabel,
+  yLabel,
+  color,
+  seriesLabel,
+  footer,
+}: {
+  title: string;
+  data: Array<{ x: number; value: number }>;
+  xLabel: string;
+  yLabel: string;
+  color: string;
+  seriesLabel: string;
+  footer?: string;
+}) {
+  const chartConfig = {
+    value: {
+      label: seriesLabel,
+      color,
+    },
+  };
+
+  return (
+    <Card className="border-border bg-card">
+      <CardHeader className="pb-2 pt-4">
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ChartContainer config={chartConfig} className="h-[300px] w-full">
+          <ReLineChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 12 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="x"
+              tickLine={false}
+              axisLine={false}
+              label={{ value: xLabel, position: "insideBottom", offset: -4 }}
+            />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              width={80}
+              label={{ value: yLabel, angle: -90, position: "insideLeft" }}
+            />
+            <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+            <Line
+              type="monotone"
+              dataKey="value"
+              name={seriesLabel}
+              stroke="var(--color-value)"
+              strokeWidth={2}
+              dot={{ r: 3 }}
+              activeDot={{ r: 5 }}
+              connectNulls
+            />
+          </ReLineChart>
+        </ChartContainer>
+        {footer ? <p className="mt-3 text-xs text-muted-foreground">{footer}</p> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  sublabel,
+}: {
+  label: string;
+  value: string;
+  sublabel: string;
+}) {
+  return (
+    <Card className="border-border bg-card">
+      <CardContent className="pt-4">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="mt-1 text-xl font-semibold text-foreground">{value}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{sublabel}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SectionFieldButtons<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          size="sm"
+          variant={value === option.value ? "default" : "outline"}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
     </div>
   );
 }
 
-function ElementTable({ results }: { results: SolverResults }) {
-  const elems = results.stresses.slice(0, 20);
+function NodeTable({ nodes }: { nodes: SolverNodeResult[] }) {
+  const preview = nodes.slice(0, 40);
+
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
+      <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border text-muted-foreground">
-            {["Elem", "cx", "cy", "σ_xx", "σ_yy", "τ_xy", "von Mises"].map(h => (
-              <th key={h} className="text-left py-2 px-2">{h}</th>
-            ))}
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th className="py-2 pr-4">Node</th>
+            <th className="py-2 pr-4">x</th>
+            <th className="py-2 pr-4">y</th>
+            <th className="py-2 pr-4">u_x</th>
+            <th className="py-2 pr-4">u_y</th>
+            <th className="py-2 pr-4">|u|</th>
           </tr>
         </thead>
         <tbody>
-          {elems.map((stress: SolverStressResult) => (
-            <tr key={stress.elementId} className="border-b border-border/40 hover:bg-secondary/30">
-              <td className="py-1.5 px-2 text-muted-foreground">{stress.elementId}</td>
-              <td className="py-1.5 px-2">{stress.cx.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{stress.cy.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{stress.sxx.toFixed(2)}</td>
-              <td className="py-1.5 px-2">{stress.syy.toFixed(2)}</td>
-              <td className="py-1.5 px-2">{stress.sxy.toFixed(2)}</td>
-              <td className="py-1.5 px-2 font-bold text-primary">{stress.vonMises.toFixed(2)}</td>
+          {preview.map((node) => (
+            <tr key={node.id} className="border-b border-border/50 last:border-0">
+              <td className="py-2 pr-4 font-mono text-muted-foreground">{node.id}</td>
+              <td className="py-2 pr-4 font-mono">{node.x.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{node.y.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{node.ux.toExponential(3)}</td>
+              <td className="py-2 pr-4 font-mono">{node.uy.toExponential(3)}</td>
+              <td className="py-2 pr-4 font-mono">{node.uMagnitude.toExponential(3)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {results.stresses.length > 20 && (
-        <div className="text-xs text-muted-foreground p-2">... {results.stresses.length - 20} more elements</div>
-      )}
+      {nodes.length > preview.length ? (
+        <div className="pt-3 text-xs text-muted-foreground">
+          Showing {preview.length} of {nodes.length} nodal values.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ElementTable({ stresses }: { stresses: SolverStressResult[] }) {
+  const preview = stresses.slice(0, 40);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th className="py-2 pr-4">Element</th>
+            <th className="py-2 pr-4">c_x</th>
+            <th className="py-2 pr-4">c_y</th>
+            <th className="py-2 pr-4">sigma_xx</th>
+            <th className="py-2 pr-4">sigma_yy</th>
+            <th className="py-2 pr-4">tau_xy</th>
+            <th className="py-2 pr-4">von Mises</th>
+          </tr>
+        </thead>
+        <tbody>
+          {preview.map((stress) => (
+            <tr key={stress.elementId} className="border-b border-border/50 last:border-0">
+              <td className="py-2 pr-4 font-mono text-muted-foreground">{stress.elementId}</td>
+              <td className="py-2 pr-4 font-mono">{stress.cx.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{stress.cy.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{stress.sxx.toFixed(3)}</td>
+              <td className="py-2 pr-4 font-mono">{stress.syy.toFixed(3)}</td>
+              <td className="py-2 pr-4 font-mono">{stress.sxy.toFixed(3)}</td>
+              <td className="py-2 pr-4 font-mono">{stress.vonMises.toFixed(3)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {stresses.length > preview.length ? (
+        <div className="pt-3 text-xs text-muted-foreground">
+          Showing {preview.length} of {stresses.length} element stress states.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -316,8 +427,10 @@ function ElementTable({ results }: { results: SolverResults }) {
 export default function Results() {
   const { id } = useParams<{ id: string }>();
   const { data: analyses = [] } = useQuery<Analysis[]>({ queryKey: ["/api/analyses"] });
+  const [stressField, setStressField] = useState<StressField>("vonMises");
+  const [deflectionField, setDeflectionField] = useState<DeflectionField>("uMagnitude");
 
-  const selectedId = id ? parseInt(id) : analyses.find(a => a.status === "complete")?.id;
+  const selectedId = id ? Number.parseInt(id, 10) : analyses.find((analysis) => analysis.status === "complete")?.id;
   const { data: analysis } = useQuery<Analysis>({
     queryKey: ["/api/analyses", selectedId],
     enabled: !!selectedId,
@@ -325,10 +438,13 @@ export default function Results() {
 
   const results = (analysis?.results as SolverResults | null) ?? null;
 
-  const exportCSV = () => {
-    if (!results?.stresses) return;
+  const exportElementCsv = () => {
+    if (!results) {
+      return;
+    }
+
     const rows = [
-      ["Element", "cx", "cy", "sxx", "syy", "sxy", "vonMises"],
+      ["elementId", "cx", "cy", "sxx", "syy", "sxy", "vonMises"],
       ...results.stresses.map((stress) => [
         stress.elementId,
         stress.cx,
@@ -339,149 +455,257 @@ export default function Results() {
         stress.vonMises,
       ]),
     ];
-    const csv = rows.map(r => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `tkfem_results_${selectedId}.csv`;
-    a.click();
+    const csv = rows.map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `tkfem-element-results-${selectedId}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   if (!analysis || !results) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="text-center py-16 text-muted-foreground border border-dashed border-border rounded-xl">
+      <div className="mx-auto max-w-4xl p-6">
+        <div className="rounded-xl border border-dashed border-border py-16 text-center text-muted-foreground">
           <BarChart3 size={32} className="mx-auto mb-3 opacity-30" />
-          <div className="font-medium">No results to display</div>
-          <div className="text-sm mt-1">Run an analysis first to see results here</div>
+          <div className="font-medium">No results are available.</div>
+          <div className="mt-1 text-sm">Run an analysis first, then return here for post-processing.</div>
           <Link href="/solver">
-            <Button variant="outline" size="sm" className="mt-4">Go to Solver</Button>
+            <Button variant="outline" size="sm" className="mt-4">
+              Open Solver
+            </Button>
           </Link>
         </div>
       </div>
     );
   }
 
-  // Build convergence chart data
-  const convergenceData = results.convergenceData.flatMap((point: SolverConvergencePoint) => {
-    const color = point.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
-    const seriesKey = point.method.includes("TK") ? "TK-FEM" : "Standard FEM";
-    return [{ x: point.nElem, y: point.error, series: seriesKey, color }];
-  });
-
-  // SCF convergence
-  const scfData = results.convergenceData.flatMap((point: SolverConvergencePoint) => {
-    const color = point.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
-    const seriesKey = point.method.includes("TK") ? "TK-FEM" : "Standard FEM";
-    return [{ x: point.nElem, y: point.scf, series: seriesKey, color }];
-  });
+  const convergence = buildPivotedChartData(results.convergenceData, (point) => point.error);
+  const scfConvergence = buildPivotedChartData(results.convergenceData, (point) => point.scf);
+  const kirschBoundaryData = buildKirschBoundaryData(analysis.loadMagnitude, results.kirschSCF);
+  const stressProfile = buildStressProfile(results, analysis, stressField);
+  const deflectionProfile = buildDeflectionProfile(results, deflectionField);
+  const magnusAnalysis = results.magnusAnalysis;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="mx-auto max-w-7xl space-y-5 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="mb-1 flex items-center gap-2">
             <Link href={`/solver/${selectedId}`}>
-              <Button variant="ghost" size="sm" className="text-muted-foreground p-1">
+              <Button variant="ghost" size="sm" className="px-2">
                 <ChevronLeft size={14} />
               </Button>
             </Link>
-            <h1 className="text-xl font-bold">Results: {analysis.name}</h1>
-            <Badge variant="outline" className="status-complete text-xs">Complete</Badge>
+            <h1 className="text-xl font-bold">{analysis.name}</h1>
+            <Badge variant="outline" className="status-complete">
+              Complete
+            </Badge>
           </div>
-          <p className="text-sm text-muted-foreground font-mono">
-            {results.nElements} elements · {results.nDOF} DOFs · Magnus m={results.magnusOrder}
-            {results.executionTimeMs && ` · ${results.executionTimeMs}ms`}
+          <p className="text-sm text-muted-foreground">
+            {results.nElements} elements, {results.nDOF} DOFs, effective Magnus order m = {results.magnusOrder}
+            {results.executionTimeMs ? `, solved in ${results.executionTimeMs} ms` : ""}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={exportCSV} data-testid="button-export-csv">
-          <Download size={13} className="mr-1.5" />
-          Export CSV
+        <Button variant="outline" size="sm" onClick={exportElementCsv}>
+          <Download size={14} className="mr-2" />
+          Export Element CSV
         </Button>
       </div>
 
-      {/* Key metrics */}
-      {results.kirschSCF !== undefined && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "SCF K_t (TK-FEM)", value: results.kirschSCF?.toFixed(4), sub: "Kirsch exact = 3.0000", color: "primary" },
-            {
-              label: "Error vs Kirsch",
-              value: `${(results.kirschError ?? 0).toFixed(2)}%`,
-              sub: "Relative",
-              color: (results.kirschError ?? Number.POSITIVE_INFINITY) < 5 ? "chart-3" : "chart-5",
-            },
-            { label: "Max von Mises", value: results.maxVonMises?.toFixed(2), sub: "MPa", color: "accent" },
-            { label: "Max |u|", value: results.maxDisp?.toExponential(3), sub: "mm", color: "foreground" },
-          ].map(({ label, value, sub, color }) => (
-            <Card key={label} className="border-border bg-card">
-              <CardContent className="pt-4 pb-4">
-                <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
-                <div className="text-xl font-bold font-mono" style={{ color: `hsl(var(--${color}))` }}>{value}</div>
-                <div className="text-xs text-muted-foreground">{sub}</div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Peak von Mises" value={`${formatValue(results.maxVonMises)} MPa`} sublabel="Element stress envelope" />
+        <MetricCard label="Peak displacement" value={`${formatValue(results.maxDisp)} mm`} sublabel="Maximum nodal magnitude" />
+        <MetricCard
+          label="Kirsch SCF"
+          value={typeof results.kirschSCF === "number" ? formatValue(results.kirschSCF) : "n/a"}
+          sublabel={typeof results.kirschError === "number" ? `Error ${results.kirschError.toFixed(2)}% vs exact 3.0` : "Not applicable"}
+        />
+        <MetricCard
+          label="Magnus strategy"
+          value={
+            magnusAnalysis?.strategy === "finite_closure"
+              ? "Finite closure"
+              : magnusAnalysis?.strategy === "manual_truncation"
+                ? "Manual truncation"
+                : "Truncated Magnus"
+          }
+          sublabel={magnusAnalysis?.backend ? `Backend: ${magnusAnalysis.backend}` : "No Magnus metadata"}
+        />
+      </div>
 
-      <Tabs defaultValue="convergence">
-        <TabsList>
+      <Tabs defaultValue="plots">
+        <TabsList className="flex flex-wrap">
+          <TabsTrigger value="plots">Plots</TabsTrigger>
+          <TabsTrigger value="magnus">Magnus</TabsTrigger>
           <TabsTrigger value="convergence">Convergence</TabsTrigger>
-          <TabsTrigger value="kirsch">Kirsch Validation</TabsTrigger>
-          <TabsTrigger value="nodes">Node Displacements</TabsTrigger>
-          <TabsTrigger value="elements">Element Stresses</TabsTrigger>
+          <TabsTrigger value="kirsch">Kirsch</TabsTrigger>
+          <TabsTrigger value="nodes">Nodes</TabsTrigger>
+          <TabsTrigger value="elements">Elements</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="convergence" className="mt-4 space-y-4">
-          <Card className="border-border bg-card">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <TrendingUp size={13} style={{ color: "hsl(var(--primary))" }} />
-                Error vs. Number of Elements — TK-FEM vs Standard FEM
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <LineChart
-                data={convergenceData}
-                title=""
-                xLabel="Number of Elements"
-                yLabel="Error (%)"
-              />
-              <p className="text-xs text-muted-foreground mt-3">
-                TK-FEM achieves lower error per element due to exact intra-element field satisfaction via Koenian transport. Standard FEM requires more elements for equivalent accuracy due to polynomial interpolation error.
-              </p>
-            </CardContent>
-          </Card>
+        <TabsContent value="plots" className="mt-4 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="border-border bg-card">
+              <CardHeader className="pb-2 pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Sigma size={14} />
+                    Stress contours
+                  </CardTitle>
+                  <SectionFieldButtons
+                    value={stressField}
+                    onChange={setStressField}
+                    options={[
+                      { value: "vonMises", label: "von Mises" },
+                      { value: "sxx", label: "sigma_xx" },
+                      { value: "syy", label: "sigma_yy" },
+                      { value: "sxy", label: "tau_xy" },
+                    ]}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <StressContourCanvas results={results} field={stressField} />
+                <p className="text-xs text-muted-foreground">
+                  Element-wise stress contours are drawn on the solved mesh using centroid stress recovery.
+                </p>
+              </CardContent>
+            </Card>
 
-          <Card className="border-border bg-card">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-sm">SCF Convergence to K_t = 3.0</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <LineChart
-                data={scfData}
-                title=""
-                xLabel="Number of Elements"
-                yLabel="SCF K_t"
+            <Card className="border-border bg-card">
+              <CardHeader className="pb-2 pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Waves size={14} />
+                    Deflection contours
+                  </CardTitle>
+                  <SectionFieldButtons
+                    value={deflectionField}
+                    onChange={setDeflectionField}
+                    options={[
+                      { value: "uMagnitude", label: "|u|" },
+                      { value: "ux", label: "u_x" },
+                      { value: "uy", label: "u_y" },
+                    ]}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <DeflectionContourCanvas results={results} field={deflectionField} />
+                <p className="text-xs text-muted-foreground">
+                  Deflection contours are averaged from nodal displacements and plotted over the active finite element mesh.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="border-border bg-card">
+              <CardHeader className="pb-2 pt-4">
+                <CardTitle className="text-sm">Deformed shape</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <DeformedShapeCanvas results={results} field={deflectionField} />
+                <p className="text-xs text-muted-foreground">
+                  The undeformed mesh is shown in the background; the foreground mesh is amplified for visual interpretation.
+                </p>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4">
+              <SingleSeriesChart
+                title={`Centerline stress profile: ${getStressFieldLabel(stressField)}`}
+                data={stressProfile}
+                xLabel="x position [mm]"
+                yLabel={`${getStressFieldLabel(stressField)} [MPa]`}
+                color="#f59e0b"
+                seriesLabel={getStressFieldLabel(stressField)}
+                footer="Profile extracted from the element row closest to the horizontal midline."
               />
-            </CardContent>
-          </Card>
+              <SingleSeriesChart
+                title={`Loaded-edge deflection profile: ${getDeflectionFieldLabel(deflectionField)}`}
+                data={deflectionProfile}
+                xLabel="y position [mm]"
+                yLabel={`${getDeflectionFieldLabel(deflectionField)} [mm]`}
+                color="#38bdf8"
+                seriesLabel={getDeflectionFieldLabel(deflectionField)}
+                footer="Profile extracted along the right-hand loaded boundary of the quarter model."
+              />
+            </div>
+          </div>
         </TabsContent>
 
-        <TabsContent value="kirsch" className="mt-4">
+        <TabsContent value="magnus" className="mt-4">
+          {magnusAnalysis ? (
+            <MagnusAnalysisPanel analysis={magnusAnalysis} />
+          ) : (
+            <Card className="border-border bg-card">
+              <CardContent className="pt-6 text-sm text-muted-foreground">
+                This result set does not include Magnus diagnostics.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="convergence" className="mt-4 space-y-4">
+          <ChartCard
+            title="Error versus element count"
+            data={convergence.data}
+            series={convergence.series}
+            xLabel="Element count"
+            yLabel="Error [%]"
+            footer="The seeded benchmark curves remain reference data; the current run is added as a separate series when available."
+          />
+          <ChartCard
+            title="Stress concentration factor convergence"
+            data={scfConvergence.data}
+            series={scfConvergence.series}
+            xLabel="Element count"
+            yLabel="SCF"
+            referenceLine={{ y: 3, label: "Kirsch exact" }}
+            footer="SCF convergence is reported against the exact Kirsch value of 3.0 for a circular hole in an infinite plate."
+          />
+        </TabsContent>
+
+        <TabsContent value="kirsch" className="mt-4 space-y-4">
+          <ChartCard
+            title="Kirsch boundary stress at r = a"
+            data={kirschBoundaryData.map((point) => ({
+              x: point.theta,
+              analytical: point.analytical,
+              computed: point.computed,
+            }))}
+            series={[
+              { key: "analytical", label: "Analytical sigma_theta_theta", color: "#f59e0b" },
+              { key: "computed", label: "Computed top-point sample", color: "#38bdf8" },
+            ]}
+            xLabel="Theta [deg]"
+            yLabel="Boundary stress [MPa]"
+            footer="The analytical curve uses sigma_theta_theta(a, theta) = sigma_inf * (1 - 2 cos 2 theta). The computed marker is the solver's approximate crown sample."
+          />
+
           <Card className="border-border bg-card">
             <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-sm">Kirsch Analytical Solution — σ_θθ at Hole Boundary (r = a)</CardTitle>
+              <CardTitle className="text-sm">Kirsch comparison</CardTitle>
             </CardHeader>
-            <CardContent>
-              <KirschChart loadMag={analysis.loadMagnitude} holeRadius={analysis.holeRadius} />
-              <div className="mt-4 bg-secondary/40 rounded-md p-3 text-xs font-mono space-y-1">
-                <div className="text-muted-foreground">Kirsch (1898) analytical solution — plate with circular hole, uniaxial tension σ∞:</div>
-                <div className="text-foreground mt-2">σ_θθ(a, θ) = σ∞ · (1 − 2cos2θ)</div>
-                <div className="text-foreground">σ_max = σ∞ · 3  at  θ = ±90°  →  K_t = 3.0</div>
-                <div className="text-primary mt-2">TK-FEM K_t = {results.kirschSCF?.toFixed(4) ?? "—"} (error = {results.kirschError?.toFixed(2) ?? "—"}%)</div>
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-md border border-border bg-secondary/20 p-3">
+                <div className="text-xs text-muted-foreground">Exact stress concentration</div>
+                <div className="mt-1 text-lg font-semibold">3.0000</div>
+              </div>
+              <div className="rounded-md border border-border bg-secondary/20 p-3">
+                <div className="text-xs text-muted-foreground">Computed SCF</div>
+                <div className="mt-1 text-lg font-semibold">
+                  {typeof results.kirschSCF === "number" ? results.kirschSCF.toFixed(4) : "n/a"}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-secondary/20 p-3">
+                <div className="text-xs text-muted-foreground">Relative error</div>
+                <div className="mt-1 text-lg font-semibold">
+                  {typeof results.kirschError === "number" ? `${results.kirschError.toFixed(2)}%` : "n/a"}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -489,18 +713,22 @@ export default function Results() {
 
         <TabsContent value="nodes" className="mt-4">
           <Card className="border-border bg-card">
-            <CardHeader className="pb-2 pt-4"><CardTitle className="text-sm">Nodal Displacements</CardTitle></CardHeader>
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-sm">Nodal displacement table</CardTitle>
+            </CardHeader>
             <CardContent>
-              <NodeTable results={results} />
+              <NodeTable nodes={results.nodes} />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="elements" className="mt-4">
           <Card className="border-border bg-card">
-            <CardHeader className="pb-2 pt-4"><CardTitle className="text-sm">Element Stresses (MPa)</CardTitle></CardHeader>
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-sm">Element stress table</CardTitle>
+            </CardHeader>
             <CardContent>
-              <ElementTable results={results} />
+              <ElementTable stresses={results.stresses} />
             </CardContent>
           </Card>
         </TabsContent>

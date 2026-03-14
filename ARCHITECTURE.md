@@ -24,7 +24,7 @@ State and data flow:
 
 - React Query for API fetching and mutation
 - Form state via `react-hook-form` + `zod`
-- Canvas-based rendering for mesh and result views
+- Canvas-based rendering for mesh, stress contours, deflection contours, and deformed-shape views
 
 ## Backend
 
@@ -34,8 +34,15 @@ Main entrypoints:
 - `server/routes.ts`
 - `server/static.ts`
 - `server/vite.ts`
+- `server/magnus-analysis.ts`
 
 The backend currently uses in-memory storage via `server/storage.ts`.
+
+Solver support services:
+
+- `server/tkfem-solver.ts` performs assembly and post-processing
+- `server/magnus-analysis.ts` selects the SymPy or numeric Magnus backend
+- `python/magnus_analysis.py` performs symbolic Lie-algebra closure analysis when Python is available
 
 ## Shared Contracts
 
@@ -52,6 +59,8 @@ Production build:
 
 - client bundle -> `dist/public`
 - server bundle -> `dist/index.cjs`
+- Python Magnus script -> `dist/python`
+- `requirements.txt` -> `dist/requirements.txt`
 
 Optional static export:
 

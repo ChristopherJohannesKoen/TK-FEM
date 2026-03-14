@@ -123,6 +123,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
         loadType: analysis.loadType,
         loadMag: analysis.loadMagnitude,
         magnusTrunc: analysis.magnusTruncation,
+        magnusMode: analysis.magnusMode as SolverParams["magnusMode"],
       };
       const results = await runTKFEM(params);
 
@@ -153,6 +154,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
     loadType: z.string().default("uniform_tension"),
     loadMag: z.number().default(100),
     magnusTrunc: z.number().int().min(1).max(5).default(3),
+    magnusMode: z.enum(["auto", "manual"]).default("auto"),
   });
 
   app.post("/api/solve", async (req, res) => {

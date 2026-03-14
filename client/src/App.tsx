@@ -4,15 +4,6 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 
-// Pages
-import Dashboard from "@/pages/Dashboard";
-import Projects from "@/pages/Projects";
-import NewAnalysis from "@/pages/NewAnalysis";
-import Solver from "@/pages/Solver";
-import Results from "@/pages/Results";
-import Theory from "@/pages/Theory";
-import NotFound from "@/pages/not-found";
-
 // Icons (lucide-react)
 import {
   LayoutDashboard,
@@ -26,7 +17,15 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Projects = lazy(() => import("@/pages/Projects"));
+const NewAnalysis = lazy(() => import("@/pages/NewAnalysis"));
+const Solver = lazy(() => import("@/pages/Solver"));
+const Results = lazy(() => import("@/pages/Results"));
+const Theory = lazy(() => import("@/pages/Theory"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 function TKFEMLogo() {
   return (
@@ -157,17 +156,25 @@ function AppShell() {
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto">
-          <Switch>
-            <Route path="/" component={Dashboard} />
-            <Route path="/projects" component={Projects} />
-            <Route path="/new-analysis" component={NewAnalysis} />
-            <Route path="/solver" component={Solver} />
-            <Route path="/solver/:id" component={Solver} />
-            <Route path="/results" component={Results} />
-            <Route path="/results/:id" component={Results} />
-            <Route path="/theory" component={Theory} />
-            <Route component={NotFound} />
-          </Switch>
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+                Loading interface...
+              </div>
+            }
+          >
+            <Switch>
+              <Route path="/" component={Dashboard} />
+              <Route path="/projects" component={Projects} />
+              <Route path="/new-analysis" component={NewAnalysis} />
+              <Route path="/solver" component={Solver} />
+              <Route path="/solver/:id" component={Solver} />
+              <Route path="/results" component={Results} />
+              <Route path="/results/:id" component={Results} />
+              <Route path="/theory" component={Theory} />
+              <Route component={NotFound} />
+            </Switch>
+          </Suspense>
         </main>
       </div>
     </div>

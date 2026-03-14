@@ -1,4 +1,5 @@
 import type { SolverParams, SolverResults } from "@shared/solver";
+import { analyzeMagnusConvergence } from "./magnus-analysis";
 
 /**
  * TK-FEM Solver Engine
@@ -767,7 +768,7 @@ export function kirschStress(x: number, y: number, a: number, sigma_inf: number)
 // ── Main solver entry point ───────────────────────────────────────────────────
 export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   const t0 = Date.now();
-  const { W, H, holeRadius, nx, ny, E, nu, planeType, loadType, loadMag, magnusTrunc } = params;
+  const { W, H, holeRadius, nx, ny, E, nu, planeType, loadType, loadMag, magnusTrunc, magnusMode } = params;
 
   if (params.domainType === "circle_hole") {
     if (holeRadius <= 0) {
@@ -785,8 +786,24 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
       ? generateQuarterHoleMesh(W, H, holeRadius, nx, ny)
       : generateRectMesh(W, H, nx, ny);
 
+  const representativeElement = mesh.elements[0];
+  if (!representativeElement) {
+    throw new Error("Mesh generation produced no elements.");
+  }
+
+  const transport = buildTransportOperators(E, nu, planeType);
+  const magnusAnalysis = await analyzeMagnusConvergence({
+    Ax: transport.Ax,
+    Ay: transport.Ay,
+    n: transport.N,
+    hx: representativeElement.hx,
+    hy: representativeElement.hy,
+    requestedMagnusOrder: magnusTrunc,
+    mode: magnusMode,
+  });
+
   // Assemble global stiffness
-  const { K, F } = assembleFEM(mesh, E, nu, planeType, magnusTrunc);
+  const { K, F } = assembleFEM(mesh, E, nu, planeType, magnusAnalysis.appliedMagnusOrder);
 
   // Apply boundary conditions
   applyBoundaryConditions(K, F, mesh.nodes, loadType, loadMag, params.domainType, holeRadius);
@@ -795,7 +812,6 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   const U = solveLinear(K, F);
 
   // Compute element stresses
-  const { Ax, Ay, N } = buildTransportOperators(E, nu, planeType);
   const c = planeType === "plane_stress" ? E / (1 - nu * nu) : E * (1 - nu) / ((1 + nu) * (1 - 2 * nu));
   const nu_eff = planeType === "plane_stress" ? nu : nu / (1 - nu);
   const mu = E / (2 * (1 + nu));
@@ -805,6 +821,7 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
     id: nd.id, x: nd.x, y: nd.y,
     ux: U[nd.id * 2] ?? 0,
     uy: U[nd.id * 2 + 1] ?? 0,
+    uMagnitude: Math.hypot(U[nd.id * 2] ?? 0, U[nd.id * 2 + 1] ?? 0),
   }));
 
   const stresses = mesh.elements.map(elem => {
@@ -869,7 +886,7 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   const actualNElem = nx * ny;
   if (kirschSCF !== undefined) {
     convergenceData.push({
-      method: "This Run (TK-FEM m=" + magnusTrunc + ")",
+      method: "This Run (TK-FEM m=" + magnusAnalysis.appliedMagnusOrder + ")",
       nElem: actualNElem,
       scf: Number(kirschSCF.toFixed(4)),
       error: Number(kirschError?.toFixed(2) ?? 0),
@@ -879,16 +896,21 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   return {
     nodes: nodeResults,
     stresses,
+    meshElements: mesh.elements.map((element) => ({
+      id: element.id,
+      nodeIds: [...element.nodes],
+    })),
     maxDisp,
     maxVonMises,
     kirschSCF,
     kirschError,
-    magnusOrder: magnusTrunc,
+    magnusOrder: magnusAnalysis.appliedMagnusOrder,
     nElements: mesh.elements.length,
     nNodes: mesh.nodes.length,
     nDOF: mesh.nodes.length * 2,
     convergenceData,
     stressConcentrationFactor: scf,
+    magnusAnalysis,
     executionTimeMs: Date.now() - t0,
   };
 }

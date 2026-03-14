@@ -30,6 +30,7 @@ const schema = z
     planeType: z.enum(["plane_stress", "plane_strain"]),
     loadType: z.enum(["uniform_tension", "point_load", "shear"]),
     loadMagnitude: z.coerce.number().min(0),
+    magnusMode: z.enum(["auto", "manual"]),
     magnusTruncation: z.coerce.number().int().min(1).max(5),
   })
   .superRefine((value, ctx) => {
@@ -58,6 +59,7 @@ type FormData = z.infer<typeof schema>;
 type DomainType = FormData["domainType"];
 type PlaneType = FormData["planeType"];
 type LoadType = FormData["loadType"];
+type MagnusModeValue = FormData["magnusMode"];
 
 function getHashSearchParam(name: string) {
   const hash = window.location.hash;
@@ -179,6 +181,7 @@ export default function NewAnalysis() {
       planeType: "plane_stress",
       loadType: "uniform_tension",
       loadMagnitude: 100,
+      magnusMode: "auto",
       magnusTruncation: 3,
     },
   });
@@ -400,6 +403,26 @@ export default function NewAnalysis() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
+                  <Label className="text-xs text-muted-foreground mb-1.5 block">Magnus Mode</Label>
+                  <Select
+                    value={watchValues.magnusMode}
+                    onValueChange={(value) => form.setValue("magnusMode", value as MagnusModeValue)}
+                  >
+                    <SelectTrigger data-testid="select-magnus-mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto Detect with SymPy</SelectItem>
+                      <SelectItem value="manual">Manual Truncation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="mt-2 rounded bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                    {watchValues.magnusMode === "auto"
+                      ? "Automatic mode checks Lie-algebra closure with SymPy when Python is available, falls back to numeric screening otherwise, and adjusts the effective Magnus order when finite closure is detected."
+                      : "Manual mode still records the closure assessment, but it keeps the user-selected truncation order."}
+                  </div>
+                </div>
+                <div>
                   <div className="flex justify-between mb-1">
                     <Label className="text-xs text-muted-foreground">Magnus Truncation Order m = {watchValues.magnusTruncation}</Label>
                     <span className="text-xs font-mono text-primary">{watchValues.magnusTruncation}</span>
@@ -415,7 +438,7 @@ export default function NewAnalysis() {
                     <div>
                       <strong className="text-foreground">m=1:</strong> Linear (nilpotent closure, exact for rect elements) ·{" "}
                       <strong className="text-foreground">m=3:</strong> Magnus Ω₁+Ω₂+Ω₃ (recommended) ·{" "}
-                      <strong className="text-foreground">m=5:</strong> High-order (curved elements)
+                      <strong className="text-foreground">m=5:</strong> High-order fallback when finite closure is not detected
                     </div>
                   </div>
                 </div>
@@ -445,6 +468,7 @@ export default function NewAnalysis() {
                   <div className="flex justify-between"><span>DOFs:</span><span>{(watchValues.meshNx + 1) * (watchValues.meshNy + 1) * 2}</span></div>
                   <div className="flex justify-between"><span>E:</span><span>{watchValues.youngModulus.toLocaleString()} MPa</span></div>
                   <div className="flex justify-between"><span>ν:</span><span>{watchValues.poissonRatio}</span></div>
+                  <div className="flex justify-between"><span>Magnus Mode:</span><span>{watchValues.magnusMode === "auto" ? "Auto" : "Manual"}</span></div>
                   <div className="flex justify-between"><span>Magnus m:</span><span className="text-primary">{watchValues.magnusTruncation}</span></div>
                   <div className="flex justify-between"><span>Load:</span><span>{watchValues.loadMagnitude} MPa</span></div>
                 </div>

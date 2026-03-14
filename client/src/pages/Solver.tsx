@@ -1,178 +1,149 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useParams, useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useLocation, useParams } from "wouter";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Play, RefreshCw, Clock, ExternalLink } from "lucide-react";
-import { Link } from "wouter";
+import {
+  DeflectionContourCanvas,
+  StressContourCanvas,
+} from "@/components/results/field-canvases";
 import type { Analysis } from "@shared/schema";
-import type { SolverResults, StressField } from "@shared/solver";
-import { useEffect, useRef, useState } from "react";
+import type { DeflectionField, SolverResults, StressField } from "@shared/solver";
+import { Clock, ExternalLink, Play, RefreshCw } from "lucide-react";
 
-// Stress color map: blue → cyan → green → yellow → orange → red
-function stressColor(value: number, min: number, max: number): string {
-  const t = max > min ? (value - min) / (max - min) : 0;
-  const colors = [
-    [26, 26, 110],   // deep blue
-    [0, 102, 204],   // blue
-    [0, 191, 255],   // cyan
-    [0, 255, 128],   // green
-    [255, 255, 0],   // yellow
-    [255, 128, 0],   // orange
-    [255, 0, 0],     // red
-    [139, 0, 0],     // dark red
-  ];
-  const seg = t * (colors.length - 1);
-  const idx = Math.min(Math.floor(seg), colors.length - 2);
-  const frac = seg - idx;
-  const c0 = colors[idx], c1 = colors[idx + 1];
-  const r = Math.round(c0[0] + frac * (c1[0] - c0[0]));
-  const g = Math.round(c0[1] + frac * (c1[1] - c0[1]));
-  const b = Math.round(c0[2] + frac * (c1[2] - c0[2]));
-  return `rgb(${r},${g},${b})`;
+function formatValue(value: number) {
+  const absolute = Math.abs(value);
+  if (absolute === 0) {
+    return "0";
+  }
+  if (absolute >= 1e4 || absolute < 1e-3) {
+    return value.toExponential(3);
+  }
+  if (absolute >= 100) {
+    return value.toFixed(1);
+  }
+  if (absolute >= 1) {
+    return value.toFixed(4);
+  }
+  return value.toFixed(6);
 }
 
-function StressContourCanvas({ results, field }: { results: SolverResults; field: StressField }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const cw = canvas.width, ch = canvas.height;
-    ctx.clearRect(0, 0, cw, ch);
-
-    const stresses = results.stresses;
-    const nodes = results.nodes;
-
-    if (!stresses.length) return;
-
-    const allX = nodes.map((node) => node.x);
-    const allY = nodes.map((node) => node.y);
-    const xMin = Math.min(...allX), xMax = Math.max(...allX);
-    const yMin = Math.min(...allY), yMax = Math.max(...allY);
-
-    const pad = 24;
-    const scX = (cw - pad * 2) / (xMax - xMin || 1);
-    const scY = (ch - pad * 2) / (yMax - yMin || 1);
-    const sc = Math.min(scX, scY);
-
-    const toCanvas = (x: number, y: number) => ({
-      cx: pad + (x - xMin) * sc,
-      cy: ch - pad - (y - yMin) * sc,
-    });
-
-    const values = stresses.map((stress) => stress[field]);
-    const vMin = Math.min(...values), vMax = Math.max(...values);
-
-    // Draw each element
-    ctx.save();
-    for (const stress of stresses) {
-      const { cx, cy } = toCanvas(stress.cx, stress.cy);
-      const val = stress[field] as number;
-      const color = stressColor(val, vMin, vMax);
-
-      // Draw a rect for each element centroid area
-      const wx = sc * (xMax - xMin) / (results.nodes.length ** 0.5 || 4);
-      const wy = sc * (yMax - yMin) / (results.nodes.length ** 0.5 || 4);
-      const hw = wx / 2, hh = wy / 2;
-
-      ctx.fillStyle = color;
-      ctx.fillRect(cx - hw, cy - hh, wx, wy);
-    }
-
-    // Draw mesh lines
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-    ctx.lineWidth = 0.5;
-    for (const n of nodes) {
-      const { cx, cy } = toCanvas(n.x, n.y);
-      ctx.beginPath();
-      ctx.arc(cx, cy, 1.5, 0, 2 * Math.PI);
-      ctx.fillStyle = "rgba(255,255,255,0.5)";
-      ctx.fill();
-    }
-    ctx.restore();
-
-    // Color scale bar
-    const barX = cw - 18, barH = ch - pad * 2;
-    const grad = ctx.createLinearGradient(0, pad, 0, pad + barH);
-    grad.addColorStop(0, "rgb(139,0,0)");
-    grad.addColorStop(0.25, "rgb(255,128,0)");
-    grad.addColorStop(0.5, "rgb(255,255,0)");
-    grad.addColorStop(0.75, "rgb(0,191,255)");
-    grad.addColorStop(1, "rgb(26,26,110)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(barX, pad, 10, barH);
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.strokeRect(barX, pad, 10, barH);
-
-    // Labels
-    ctx.fillStyle = "rgba(255,255,255,0.8)";
-    ctx.font = "10px JetBrains Mono, monospace";
-    ctx.textAlign = "left";
-    ctx.fillText(vMax.toFixed(1), barX + 13, pad + 8);
-    ctx.fillText(((vMax + vMin) / 2).toFixed(1), barX + 13, pad + barH / 2);
-    ctx.fillText(vMin.toFixed(1), barX + 13, pad + barH);
-
-  }, [results, field]);
-
-  return <canvas ref={canvasRef} width={480} height={360} className="rounded-md border border-border w-full" />;
+function FieldButtons<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          size="sm"
+          variant={option.value === value ? "default" : "outline"}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
 }
 
-function SolverLog({ analysis, isRunning }: { analysis: Analysis; isRunning: boolean }) {
+function SolverLog({
+  analysis,
+  isRunning,
+}: {
+  analysis: Analysis;
+  isRunning: boolean;
+}) {
   const results = (analysis.results as SolverResults | null) ?? null;
-  const lines: string[] = [
-    `[TK-FEM] Analysis: "${analysis.name}"`,
-    `[MESH]   Domain: ${analysis.domainWidth}×${analysis.domainHeight}mm, ${analysis.domainType === "circle_hole" ? `hole r=${analysis.holeRadius}mm` : "rect"}`,
-    `[MESH]   Elements: ${analysis.meshNx}×${analysis.meshNy} = ${analysis.meshNx * analysis.meshNy}, Nodes: ${(analysis.meshNx + 1) * (analysis.meshNy + 1)}, DOFs: ${(analysis.meshNx + 1) * (analysis.meshNy + 1) * 2}`,
-    `[MAT]    E=${analysis.youngModulus.toLocaleString()} MPa, ν=${analysis.poissonRatio}, ${analysis.planeType}`,
-    `[LOAD]   Type: ${analysis.loadType}, Magnitude: ${analysis.loadMagnitude} MPa`,
-    `[TK]     Magnus truncation: m=${analysis.magnusTruncation}`,
-    `[TK]     Building transport operators Ax, Ay ∈ R^{6×6}...`,
-    `[TK]     Koenian transport lift: ∂w/∂x = Ax·w, ∂w/∂y = Ay·w`,
-    `[TK]     State: w = [u_x, u_y, ∂_x·u_x, ∂_x·u_y, ∂_y·u_x, ∂_y·u_y]ᵀ ∈ R^6`,
-    `[MAGNUS] Computing Ω₁ = ∫₀¹ G(s) ds...`,
-    `[MAGNUS] Computing Ω₂ = ½[Ω₁, G_avg]... (commutator)`,
-    analysis.magnusTruncation >= 3 ? `[MAGNUS] Computing Ω₃ = ⅙[[Ω₁,Ω₂],Ω₁]...` : `[MAGNUS] Truncated at m=${analysis.magnusTruncation}`,
-    `[ASSEM]  Building element stiffness via boundary integrals: Ke = ∫∂Ωe Nᵀ H N ds`,
-    `[ASSEM]  Applying Magnus correction (Koenian closure check)...`,
-    `[ASSEM]  Assembling global stiffness K (${(analysis.meshNx + 1) * (analysis.meshNy + 1) * 2}×${(analysis.meshNx + 1) * (analysis.meshNy + 1) * 2})...`,
-    `[BC]     Applying Dirichlet BCs (symmetry: u_x=0 on Γ_L, u_y=0 on Γ_B)`,
-    `[SOLVE]  Gauss elimination with partial pivoting...`,
+  const magnus = results?.magnusAnalysis;
+  const nodeCount = (analysis.meshNx + 1) * (analysis.meshNy + 1);
+  const lines = [
+    `[ANALYSIS] ${analysis.name}`,
+    `[DOMAIN] ${analysis.domainType === "circle_hole" ? "quarter plate with circular hole" : "rectangle"}; W=${analysis.domainWidth} mm, H=${analysis.domainHeight} mm, a=${analysis.holeRadius} mm`,
+    `[MESH] ${analysis.meshNx} x ${analysis.meshNy} elements, ${nodeCount} nodes, ${nodeCount * 2} DOFs`,
+    `[MATERIAL] E=${analysis.youngModulus.toLocaleString()} MPa, nu=${analysis.poissonRatio}, ${analysis.planeType}`,
+    `[LOAD] ${analysis.loadType}, magnitude=${analysis.loadMagnitude} MPa`,
+    `[MAGNUS] mode=${analysis.magnusMode}, requested m=${analysis.magnusTruncation}`,
+    results
+      ? `[MAGNUS] backend=${magnus?.backend ?? "n/a"}, strategy=${magnus?.strategy ?? "n/a"}, applied m=${results.magnusOrder}`
+      : "[MAGNUS] closure analysis runs before stiffness assembly",
+    results
+      ? `[MAGNUS] finite closure=${magnus?.finiteSeriesExact ? "yes" : "no"}, closure order=${magnus?.closureOrder ?? "not finite"}`
+      : "[MAGNUS] evaluating Lie-algebra closure and sufficient convergence bounds",
+    results
+      ? `[POST] peak displacement=${formatValue(results.maxDisp)} mm, peak von Mises=${formatValue(results.maxVonMises)} MPa`
+      : "[POST] waiting for solver output",
+    typeof results?.kirschSCF === "number"
+      ? `[POST] Kirsch SCF=${results.kirschSCF.toFixed(4)}, error=${results.kirschError?.toFixed(2) ?? "n/a"}%`
+      : "[POST] Kirsch benchmark not available for this case",
   ];
 
-  if (analysis.status === "complete" && results) {
-    lines.push(`[POST]   Recovering stresses from transport state w(x,y) = exp(Ω)·w₀...`);
-    lines.push(`[POST]   Max displacement: ${results.maxDisp?.toExponential(3)} mm`);
-    lines.push(`[POST]   Max von Mises: ${results.maxVonMises?.toFixed(2)} MPa`);
-    if (results.kirschSCF !== undefined) {
-      lines.push(`[POST]   SCF K_t = σ_max/σ∞ = ${results.kirschSCF?.toFixed(4)}`);
-      lines.push(`[POST]   Kirsch exact = 3.0000, Error = ${results.kirschError?.toFixed(2)}%`);
-    }
-    lines.push(`[TK-FEM] Solution complete in ${results.executionTimeMs}ms ✓`);
-  } else if (analysis.status === "error") {
-    lines.push(`[ERROR]  ${analysis.errorMessage}`);
+  if (analysis.status === "error") {
+    lines.push(`[ERROR] ${analysis.errorMessage ?? "Unknown solver error"}`);
+  } else if (analysis.status === "complete" && results) {
+    lines.push(`[DONE] solution completed in ${results.executionTimeMs} ms`);
   } else if (isRunning) {
-    lines.push(`[SOLVE]  Running...`);
+    lines.push("[RUN] solver is executing");
   }
 
   return (
-    <div className="font-mono text-xs bg-secondary/60 border border-border rounded-md p-3 h-72 overflow-y-auto space-y-0.5">
-      {lines.map((line, i) => (
-        <div key={i} className={
-          line.startsWith("[ERROR]") ? "text-destructive" :
-          line.startsWith("[TK-FEM]") ? "text-primary" :
-          line.startsWith("[POST]") ? "text-green-400" :
-          line.startsWith("[MAGNUS]") ? "text-accent" :
-          "text-muted-foreground"
-        }>{line}</div>
+    <div className="h-80 space-y-1 overflow-y-auto rounded-md border border-border bg-secondary/40 p-3 font-mono text-xs">
+      {lines.map((line) => (
+        <div
+          key={line}
+          className={
+            line.startsWith("[ERROR]")
+              ? "text-destructive"
+              : line.startsWith("[DONE]")
+                ? "text-emerald-400"
+                : line.startsWith("[MAGNUS]")
+                  ? "text-amber-300"
+                  : line.startsWith("[POST]")
+                    ? "text-sky-300"
+                    : "text-muted-foreground"
+          }
+        >
+          {line}
+        </div>
       ))}
-      {isRunning && <div className="text-yellow-400 animate-pulse">▌</div>}
+      {isRunning ? <div className="animate-pulse text-amber-300">processing...</div> : null}
     </div>
+  );
+}
+
+function ParameterCard({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<[string, string]>;
+}) {
+  return (
+    <Card className="border-border bg-card">
+      <CardHeader className="pb-2 pt-4">
+        <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {items.map(([label, value]) => (
+          <div key={label} className="flex items-start justify-between gap-3 border-b border-border/50 pb-2 text-sm last:border-0 last:pb-0">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="text-right font-mono text-foreground">{value}</span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -180,12 +151,13 @@ export default function Solver() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [stressField, setStressField] = useState<StressField>("vonMises");
   const [isRunning, setIsRunning] = useState(false);
+  const [stressField, setStressField] = useState<StressField>("vonMises");
+  const [deflectionField, setDeflectionField] = useState<DeflectionField>("uMagnitude");
 
   const { data: analyses = [] } = useQuery<Analysis[]>({ queryKey: ["/api/analyses"] });
 
-  const selectedId = id ? parseInt(id) : analyses[0]?.id;
+  const selectedId = id ? Number.parseInt(id, 10) : analyses[0]?.id;
   const { data: analysis, refetch } = useQuery<Analysis>({
     queryKey: ["/api/analyses", selectedId],
     enabled: !!selectedId,
@@ -204,193 +176,250 @@ export default function Solver() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/analyses", selectedId] });
       await refetch();
-      toast({ title: "Analysis complete" });
       setIsRunning(false);
+      toast({ title: "Analysis complete" });
     },
     onError: () => {
-      toast({ title: "Solver error", variant: "destructive" });
       setIsRunning(false);
+      toast({ title: "Solver error", variant: "destructive" });
     },
   });
 
   const results = (analysis?.results as SolverResults | null) ?? null;
+  const magnus = results?.magnusAnalysis;
 
-  return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold">{analysis?.name || "Solver"}</h1>
-          <p className="text-sm text-muted-foreground font-mono">
-            {analysis && `${analysis.meshNx}×${analysis.meshNy} mesh · E=${analysis.youngModulus.toLocaleString()} · ν=${analysis.poissonRatio} · m=${analysis.magnusTruncation}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {analysis?.status && (
-            <Badge variant="outline" className={`status-${analysis.status}`}>
-              {analysis.status === "running" || isRunning ? "Running..." : analysis.status}
-            </Badge>
-          )}
-          {analysis && (
-            <Button
-              onClick={() => runMutation.mutate(analysis.id)}
-              disabled={isRunning || runMutation.isPending}
-              data-testid="button-run-solver"
-            >
-              {isRunning ? <RefreshCw size={14} className="mr-2 animate-spin" /> : <Play size={14} className="mr-2" />}
-              {isRunning ? "Solving..." : "Run TK-FEM"}
-            </Button>
-          )}
-          {results && (
-            <Link href={`/results/${selectedId}`}>
-              <Button variant="outline" size="sm" data-testid="button-view-results">
-                <ExternalLink size={13} className="mr-1.5" />
-                Results
+  if (!analysis) {
+    return (
+      <div className="mx-auto max-w-5xl p-6">
+        <Card className="border-border bg-card">
+          <CardContent className="py-16 text-center text-muted-foreground">
+            <Clock size={32} className="mx-auto mb-3 opacity-30" />
+            <div>No analysis is selected.</div>
+            <Link href="/new-analysis">
+              <Button variant="outline" size="sm" className="mt-4">
+                Create Analysis
               </Button>
             </Link>
-          )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-5 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">{analysis.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            {analysis.meshNx} x {analysis.meshNy} mesh, {analysis.planeType}, {analysis.magnusMode} Magnus mode, requested m = {analysis.magnusTruncation}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className={`status-${analysis.status}`}>
+            {analysis.status === "running" || isRunning ? "running" : analysis.status}
+          </Badge>
+          <Button
+            onClick={() => runMutation.mutate(analysis.id)}
+            disabled={isRunning || runMutation.isPending}
+          >
+            {isRunning ? <RefreshCw size={14} className="mr-2 animate-spin" /> : <Play size={14} className="mr-2" />}
+            {isRunning ? "Solving" : "Run TK-FEM"}
+          </Button>
+          {results ? (
+            <Link href={`/results/${analysis.id}`}>
+              <Button variant="outline" size="sm">
+                <ExternalLink size={14} className="mr-2" />
+                Open Results
+              </Button>
+            </Link>
+          ) : null}
         </div>
       </div>
 
-      {/* Analysis selector */}
-      {!id && analyses.length > 0 && (
+      {!id && analyses.length > 0 ? (
         <Card className="border-border bg-card">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs text-muted-foreground mb-2">Select analysis:</div>
+          <CardContent className="pt-4">
+            <div className="mb-3 text-xs text-muted-foreground">Available analyses</div>
             <div className="flex flex-wrap gap-2">
-              {analyses.map(a => (
-                <button
-                  key={a.id}
-                  onClick={() => navigate(`/solver/${a.id}`)}
-                  className="text-xs px-3 py-1.5 rounded border border-border hover:border-primary/50 hover:text-primary transition-colors"
-                  data-testid={`button-select-analysis-${a.id}`}
-                >
-                  {a.name}
-                </button>
+              {analyses.map((item) => (
+                <Button key={item.id} variant={item.id === analysis.id ? "default" : "outline"} size="sm" onClick={() => navigate(`/solver/${item.id}`)}>
+                  {item.name}
+                </Button>
               ))}
             </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
-      {/* Progress */}
-      {isRunning && (
+      {isRunning ? (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm text-yellow-400">
+          <div className="flex items-center gap-2 text-sm text-amber-300">
             <RefreshCw size={14} className="animate-spin" />
-            Solving TK-FEM system...
+            Running Magnus analysis, stiffness assembly, and solve stages.
           </div>
           <Progress value={65} className="h-1.5" />
         </div>
-      )}
+      ) : null}
 
-      {analysis ? (
-        <Tabs defaultValue="log">
-          <TabsList>
-            <TabsTrigger value="log">Solver Log</TabsTrigger>
-            <TabsTrigger value="contour" disabled={!results}>Stress Contours</TabsTrigger>
-            <TabsTrigger value="params">Parameters</TabsTrigger>
-          </TabsList>
+      <Tabs defaultValue="log">
+        <TabsList>
+          <TabsTrigger value="log">Log</TabsTrigger>
+          <TabsTrigger value="preview" disabled={!results}>
+            Preview
+          </TabsTrigger>
+          <TabsTrigger value="params">Parameters</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="log" className="mt-4">
-            <SolverLog analysis={analysis} isRunning={isRunning} />
-            {analysis.status === "complete" && results && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-                {[
-                  { label: "Elements", value: `${results.nElements}`, unit: "" },
-                  { label: "DOFs", value: `${results.nDOF}`, unit: "" },
-                  { label: "Max Displacement", value: results.maxDisp?.toExponential(3), unit: "mm" },
-                  { label: "Max von Mises", value: results.maxVonMises?.toFixed(2), unit: "MPa" },
-                  ...(results.kirschSCF !== undefined ? [
-                    { label: "SCF K_t", value: results.kirschSCF?.toFixed(4), unit: "" },
-                    { label: "Kirsch Error", value: results.kirschError?.toFixed(2) + "%", unit: "" },
-                    { label: "Magnus Order m", value: String(results.magnusOrder), unit: "" },
-                    { label: "Solve Time", value: `${results.executionTimeMs}`, unit: "ms" },
-                  ] : []),
-                ].map(({ label, value, unit }) => (
-                  <div key={label} className="bg-card border border-border rounded-md p-3">
-                    <div className="text-xs text-muted-foreground">{label}</div>
-                    <div className="font-mono font-bold text-sm text-primary">{value} <span className="text-xs text-muted-foreground">{unit}</span></div>
+        <TabsContent value="log" className="mt-4 space-y-4">
+          <SolverLog analysis={analysis} isRunning={isRunning} />
+
+          {results ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Card className="border-border bg-card">
+                <CardContent className="pt-4">
+                  <div className="text-xs text-muted-foreground">Peak displacement</div>
+                  <div className="mt-1 text-lg font-semibold">{formatValue(results.maxDisp)} mm</div>
+                </CardContent>
+              </Card>
+              <Card className="border-border bg-card">
+                <CardContent className="pt-4">
+                  <div className="text-xs text-muted-foreground">Peak von Mises</div>
+                  <div className="mt-1 text-lg font-semibold">{formatValue(results.maxVonMises)} MPa</div>
+                </CardContent>
+              </Card>
+              <Card className="border-border bg-card">
+                <CardContent className="pt-4">
+                  <div className="text-xs text-muted-foreground">Magnus strategy</div>
+                  <div className="mt-1 text-lg font-semibold">
+                    {magnus?.strategy === "finite_closure"
+                      ? "Finite closure"
+                      : magnus?.strategy === "manual_truncation"
+                        ? "Manual truncation"
+                        : "Truncated Magnus"}
                   </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
+                </CardContent>
+              </Card>
+              <Card className="border-border bg-card">
+                <CardContent className="pt-4">
+                  <div className="text-xs text-muted-foreground">Effective Magnus order</div>
+                  <div className="mt-1 text-lg font-semibold">m = {results.magnusOrder}</div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+        </TabsContent>
 
-          <TabsContent value="contour" className="mt-4">
-            {results && (
-              <div className="space-y-4">
-                <div className="flex gap-2 flex-wrap">
-                  {(["vonMises", "sxx", "syy", "sxy"] as const).map(f => (
-                    <Button
-                      key={f}
-                      variant={stressField === f ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setStressField(f)}
-                      data-testid={`button-field-${f}`}
-                    >
-                      {f === "vonMises" ? "von Mises" : f === "sxx" ? "σ_xx" : f === "syy" ? "σ_yy" : "τ_xy"}
-                    </Button>
-                  ))}
-                </div>
-                <StressContourCanvas results={results} field={stressField} />
-              </div>
-            )}
-          </TabsContent>
+        <TabsContent value="preview" className="mt-4 space-y-4">
+          {results ? (
+            <>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="border-border bg-card">
+                  <CardHeader className="pb-2 pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <CardTitle className="text-sm">Stress preview</CardTitle>
+                      <FieldButtons
+                        value={stressField}
+                        onChange={setStressField}
+                        options={[
+                          { value: "vonMises", label: "von Mises" },
+                          { value: "sxx", label: "sigma_xx" },
+                          { value: "syy", label: "sigma_yy" },
+                          { value: "sxy", label: "tau_xy" },
+                        ]}
+                      />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <StressContourCanvas results={results} field={stressField} />
+                    <p className="text-xs text-muted-foreground">Open the Results page for full post-processing, convergence plots, and exports.</p>
+                  </CardContent>
+                </Card>
 
-          <TabsContent value="params" className="mt-4">
-            {analysis && (
-              <div className="grid md:grid-cols-2 gap-4">
-                {[
-                  { section: "Domain", items: [
-                    ["Type", analysis.domainType],
-                    ["Width", `${analysis.domainWidth} mm`],
-                    ["Height", `${analysis.domainHeight} mm`],
-                    ["Hole Radius", `${analysis.holeRadius} mm`],
-                    ["Plane Type", analysis.planeType],
-                  ]},
-                  { section: "Mesh", items: [
-                    ["Nx × Ny", `${analysis.meshNx} × ${analysis.meshNy}`],
-                    ["Elements", `${analysis.meshNx * analysis.meshNy}`],
-                    ["Nodes", `${(analysis.meshNx+1)*(analysis.meshNy+1)}`],
-                    ["DOFs", `${(analysis.meshNx+1)*(analysis.meshNy+1)*2}`],
-                  ]},
-                  { section: "Material", items: [
-                    ["E", `${analysis.youngModulus.toLocaleString()} MPa`],
-                    ["ν", `${analysis.poissonRatio}`],
-                  ]},
-                  { section: "TK-FEM", items: [
-                    ["Magnus Truncation m", `${analysis.magnusTruncation}`],
-                    ["Load Type", analysis.loadType],
-                    ["Load Magnitude", `${analysis.loadMagnitude} MPa`],
-                  ]},
-                ].map(({ section, items }) => (
-                  <Card key={section} className="border-border bg-card">
-                    <CardHeader className="pb-1 pt-3"><CardTitle className="text-xs text-muted-foreground uppercase tracking-wider">{section}</CardTitle></CardHeader>
-                    <CardContent className="pb-3">
-                      {items.map(([k, v]) => (
-                        <div key={k} className="flex justify-between text-sm py-1 border-b border-border/50 last:border-0">
-                          <span className="text-muted-foreground">{k}</span>
-                          <span className="font-mono">{v}</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                ))}
+                <Card className="border-border bg-card">
+                  <CardHeader className="pb-2 pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <CardTitle className="text-sm">Deflection preview</CardTitle>
+                      <FieldButtons
+                        value={deflectionField}
+                        onChange={setDeflectionField}
+                        options={[
+                          { value: "uMagnitude", label: "|u|" },
+                          { value: "ux", label: "u_x" },
+                          { value: "uy", label: "u_y" },
+                        ]}
+                      />
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <DeflectionContourCanvas results={results} field={deflectionField} />
+                    <p className="text-xs text-muted-foreground">
+                      Magnus diagnostics: {magnus?.summary ?? "no Magnus summary is available for this run."}
+                    </p>
+                  </CardContent>
+                </Card>
               </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <Card className="border-border bg-card">
-          <CardContent className="py-16 text-center text-muted-foreground">
-            <Clock size={32} className="mx-auto mb-3 opacity-30" />
-            <div>No analysis selected.</div>
-            <Link href="/new-analysis">
-              <Button variant="outline" size="sm" className="mt-4">Create New Analysis</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+            </>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="params" className="mt-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <ParameterCard
+              title="Domain"
+              items={[
+                ["Type", analysis.domainType],
+                ["Width", `${analysis.domainWidth} mm`],
+                ["Height", `${analysis.domainHeight} mm`],
+                ["Hole radius", `${analysis.holeRadius} mm`],
+                ["Plane model", analysis.planeType],
+              ]}
+            />
+            <ParameterCard
+              title="Mesh"
+              items={[
+                ["Nx x Ny", `${analysis.meshNx} x ${analysis.meshNy}`],
+                ["Elements", `${analysis.meshNx * analysis.meshNy}`],
+                ["Nodes", `${(analysis.meshNx + 1) * (analysis.meshNy + 1)}`],
+                ["DOFs", `${(analysis.meshNx + 1) * (analysis.meshNy + 1) * 2}`],
+              ]}
+            />
+            <ParameterCard
+              title="Material"
+              items={[
+                ["Young's modulus", `${analysis.youngModulus.toLocaleString()} MPa`],
+                ["Poisson ratio", `${analysis.poissonRatio}`],
+              ]}
+            />
+            <ParameterCard
+              title="Load"
+              items={[
+                ["Type", analysis.loadType],
+                ["Magnitude", `${analysis.loadMagnitude} MPa`],
+              ]}
+            />
+            <ParameterCard
+              title="Magnus setup"
+              items={[
+                ["Mode", analysis.magnusMode],
+                ["Requested order", `m = ${analysis.magnusTruncation}`],
+                ["Backend", magnus?.backend ?? "pending"],
+                ["Strategy", magnus?.strategy ?? "pending"],
+              ]}
+            />
+            <ParameterCard
+              title="Magnus result"
+              items={[
+                ["Applied order", results ? `m = ${results.magnusOrder}` : "pending"],
+                ["Finite closure", magnus ? (magnus.finiteSeriesExact ? "yes" : "no") : "pending"],
+                ["Closure order", magnus?.closureOrder ? `${magnus.closureOrder}` : magnus ? "not finite" : "pending"],
+                ["Convergence bound", magnus ? (magnus.convergenceGuaranteed ? "satisfied" : "not guaranteed") : "pending"],
+              ]}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
