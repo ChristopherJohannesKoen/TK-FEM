@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── TK-FEM Color System ──────────────────────────────────────────────────
+     Engineering precision aesthetic: deep navy surfaces, amber accent,
+     monospace data display. Inspired by structural analysis software.
+  ── */
+  :root {
+    /* Background surfaces — deep navy-slate */
+    --background: 222 47% 11%;
+    --foreground: 210 40% 92%;
+
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 92%;
+
+    --popover: 222 47% 10%;
+    --popover-foreground: 210 40% 92%;
+
+    /* Primary accent — amber/gold (precision engineering) */
+    --primary: 38 92% 55%;
+    --primary-foreground: 222 47% 8%;
+
+    /* Secondary — muted navy */
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 82%;
+
+    /* Muted */
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 55%;
+
+    /* Accent — blue (scientific) */
+    --accent: 199 89% 48%;
+    --accent-foreground: 222 47% 8%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Border / input */
+    --border: 217 33% 22%;
+    --input: 217 33% 20%;
+    --ring: 38 92% 55%;
+
+    /* Radius */
+    --radius: 0.375rem;
+
+    /* Chart colors */
+    --chart-1: 38 92% 55%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 280 67% 63%;
+    --chart-5: 0 72% 56%;
+
+    /* Sidebar */
+    --sidebar-background: 222 47% 9%;
+    --sidebar-foreground: 210 40% 88%;
+    --sidebar-primary: 38 92% 55%;
+    --sidebar-primary-foreground: 222 47% 8%;
+    --sidebar-accent: 217 33% 16%;
+    --sidebar-accent-foreground: 210 40% 88%;
+    --sidebar-border: 217 33% 20%;
+    --sidebar-ring: 38 92% 55%;
+  }
+
+  .light {
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 38 92% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 93%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 93%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 199 89% 42%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 87%;
+    --input: 220 13% 87%;
+    --ring: 38 92% 45%;
+    --chart-1: 38 92% 45%;
+    --chart-2: 199 89% 42%;
+    --chart-3: 142 71% 38%;
+    --chart-4: 280 67% 55%;
+    --chart-5: 0 72% 50%;
+    --sidebar-background: 220 20% 97%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 38 92% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 91%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 13% 87%;
+    --sidebar-ring: 38 92% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
+  }
+
+  /* Engineering monospace for numbers */
+  .mono, .font-mono, code, pre, kbd {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    font-feature-settings: "ss01" 1, "zero" 1;
+  }
+
+  /* Stress color scale */
+  .stress-scale {
+    background: linear-gradient(to right, #1a1a6e, #0f3d8c, #0066cc, #00bfff, #00ff80, #ffff00, #ff8000, #ff0000, #8b0000);
+  }
+}
+
+/* ── Custom scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.6);
+}
+
+/* ── Canvas styles ────────────────────────────────────────────────────── */
+.mesh-canvas {
+  cursor: crosshair;
+  image-rendering: crisp-edges;
+}
+
+/* ── Data panels ──────────────────────────────────────────────────────── */
+.data-panel {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+}
+
+/* ── Formula display ──────────────────────────────────────────────────── */
+.math-block {
+  background: hsl(var(--secondary));
+  border-left: 3px solid hsl(var(--primary));
+  padding: 0.75rem 1rem;
+  font-family: 'KaTeX_Math', 'Latin Modern Math', 'STIX Two Math', Georgia, serif;
+  font-style: italic;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* ── Status badges ────────────────────────────────────────────────────── */
+.status-pending   { @apply text-muted-foreground; }
+.status-running   { @apply text-yellow-400; }
+.status-complete  { @apply text-green-400; }
+.status-error     { @apply text-destructive; }
+
+/* ── Node/element highlight on hover ─────────────────────────────────── */
+.fem-element:hover { opacity: 0.8; cursor: pointer; }
+
+/* ── Gradient accent ──────────────────────────────────────────────────── */
+.brand-gradient {
+  background: linear-gradient(135deg, hsl(38 92% 55%), hsl(199 89% 48%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Smooth nav transitions ──────────────────────────────────────────── */
+.nav-link {
+  transition: all 0.15s ease;
+}
+.nav-link.active {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border-right: 2px solid hsl(var(--primary));
+}
