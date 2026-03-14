@@ -4,10 +4,12 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
+    "dev": "tsx script/dev.ts",
     "build": "tsx script/build.ts",
-    "start": "NODE_ENV=production node dist/index.cjs",
+    "export:static": "node script/export-static.mjs",
+    "start": "node script/start.mjs",
     "check": "tsc",
+    "verify": "npm run check && npm run build",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

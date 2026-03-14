@@ -5,8 +5,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Activity, Cpu, FolderOpen, FlaskConical, TrendingUp, Zap, CheckCircle2, Clock } from "lucide-react";
 import type { Project, Analysis } from "@shared/schema";
+import type { LucideIcon } from "lucide-react";
 
-function StatCard({ icon: Icon, label, value, sub, color }: any) {
+interface StatCardProps {
+  icon: LucideIcon;
+  label: string;
+  value: number | string;
+  sub?: string;
+  color?: string;
+}
+
+function StatCard({ icon: Icon, label, value, sub, color }: StatCardProps) {
   return (
     <Card className="border-border bg-card">
       <CardContent className="pt-4 pb-4">
@@ -42,8 +51,8 @@ function MeshPreviewSVG({ nx = 4, ny = 4, hasHole = false }: { nx?: number; ny?:
       {lines}
       {hasHole && (
         <>
-          <circle cx="50" cy="50" r="12" fill="hsl(217,33%,11%)" stroke="hsl(38,92%,55%)" strokeWidth="1.2" />
-          <text x="55" y="33" fill="hsl(38,92%,55%)" fontSize="5" fontFamily="monospace">σ∞</text>
+          <path d="M0,100 L12,100 A12,12 0 0 0 0,88 Z" fill="hsl(217,33%,11%)" stroke="hsl(38,92%,55%)" strokeWidth="1.2" />
+          <text x="82" y="20" fill="hsl(38,92%,55%)" fontSize="5" fontFamily="monospace">σ∞</text>
           <path d="M95,50 L85,50" stroke="hsl(38,92%,55%)" strokeWidth="1.2" markerEnd="url(#arr)" />
         </>
       )}
@@ -92,7 +101,7 @@ export default function Dashboard() {
         </div>
         <div className="hidden md:block w-52 shrink-0">
           <MeshPreviewSVG nx={5} ny={5} hasHole={true} />
-          <div className="text-center text-xs text-muted-foreground mt-1 font-mono">Kirsch benchmark — K_t = 3.0</div>
+          <div className="text-center text-xs text-muted-foreground mt-1 font-mono">Kirsch quarter-model benchmark — K_t = 3.0</div>
         </div>
       </div>
 

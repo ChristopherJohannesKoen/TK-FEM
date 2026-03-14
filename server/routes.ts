@@ -3,7 +3,17 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertAnalysisSchema, insertBookmarkSchema } from "@shared/schema";
 import { runTKFEM } from "./tkfem-solver";
+import type { SolverParams } from "@shared/solver";
 import { z } from "zod";
+
+function parsePositiveInt(value: string) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
 
 export function registerRoutes(httpServer: Server, app: Express) {
 
@@ -14,7 +24,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.get("/api/projects/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid project id" });
     const project = await storage.getProject(id);
     if (!project) return res.status(404).json({ message: "Project not found" });
     res.json(project);
@@ -28,7 +39,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.put("/api/projects/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid project id" });
     const parsed = insertProjectSchema.partial().safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const project = await storage.updateProject(id, parsed.data);
@@ -37,7 +49,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/projects/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid project id" });
     await storage.deleteProject(id);
     res.status(204).end();
   });
@@ -49,13 +62,15 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.get("/api/projects/:projectId/analyses", async (req, res) => {
-    const projectId = parseInt(req.params.projectId);
+    const projectId = parsePositiveInt(req.params.projectId);
+    if (!projectId) return res.status(400).json({ message: "Invalid project id" });
     const analyses = await storage.getAnalyses(projectId);
     res.json(analyses);
   });
 
   app.get("/api/analyses/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid analysis id" });
     const analysis = await storage.getAnalysis(id);
     if (!analysis) return res.status(404).json({ message: "Analysis not found" });
     res.json(analysis);
@@ -69,7 +84,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.put("/api/analyses/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid analysis id" });
     const analysis = await storage.getAnalysis(id);
     if (!analysis) return res.status(404).json({ message: "Analysis not found" });
     const updated = await storage.updateAnalysis(id, req.body);
@@ -77,14 +93,16 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/analyses/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid analysis id" });
     await storage.deleteAnalysis(id);
     res.status(204).end();
   });
 
   // ── Solver endpoint ───────────────────────────────────────────────────────
   app.post("/api/analyses/:id/run", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid analysis id" });
     const analysis = await storage.getAnalysis(id);
     if (!analysis) return res.status(404).json({ message: "Analysis not found" });
 
@@ -92,7 +110,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
     await storage.updateAnalysis(id, { status: "running" });
 
     try {
-      const results = await runTKFEM({
+      const params: SolverParams = {
         domainType: analysis.domainType as "rectangle" | "circle_hole",
         W: analysis.domainWidth,
         H: analysis.domainHeight,
@@ -105,17 +123,19 @@ export function registerRoutes(httpServer: Server, app: Express) {
         loadType: analysis.loadType,
         loadMag: analysis.loadMagnitude,
         magnusTrunc: analysis.magnusTruncation,
-      });
+      };
+      const results = await runTKFEM(params);
 
       const updated = await storage.updateAnalysis(id, {
         status: "complete",
-        results: results as any,
+        results,
         errorMessage: null,
       });
       res.json(updated);
-    } catch (err: any) {
-      await storage.updateAnalysis(id, { status: "error", errorMessage: err.message });
-      res.status(500).json({ message: "Solver error: " + err.message });
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      await storage.updateAnalysis(id, { status: "error", errorMessage: message });
+      res.status(500).json({ message: `Solver error: ${message}` });
     }
   });
 
@@ -141,8 +161,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
     try {
       const results = await runTKFEM(parsed.data);
       res.json(results);
-    } catch (err: any) {
-      res.status(500).json({ message: "Solver error: " + err.message });
+    } catch (error: unknown) {
+      res.status(500).json({ message: `Solver error: ${getErrorMessage(error)}` });
     }
   });
 
@@ -167,13 +187,15 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   // ── Bookmarks ─────────────────────────────────────────────────────────────
   app.get("/api/analyses/:analysisId/bookmarks", async (req, res) => {
-    const analysisId = parseInt(req.params.analysisId);
+    const analysisId = parsePositiveInt(req.params.analysisId);
+    if (!analysisId) return res.status(400).json({ message: "Invalid analysis id" });
     const bookmarks = await storage.getBookmarks(analysisId);
     res.json(bookmarks);
   });
 
   app.post("/api/analyses/:analysisId/bookmarks", async (req, res) => {
-    const analysisId = parseInt(req.params.analysisId);
+    const analysisId = parsePositiveInt(req.params.analysisId);
+    if (!analysisId) return res.status(400).json({ message: "Invalid analysis id" });
     const parsed = insertBookmarkSchema.safeParse({ ...req.body, analysisId });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const bookmark = await storage.createBookmark(parsed.data);
@@ -181,7 +203,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.delete("/api/bookmarks/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid bookmark id" });
     await storage.deleteBookmark(id);
     res.status(204).end();
   });

@@ -5,13 +5,26 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Analysis } from "@shared/schema";
+import type {
+  SolverConvergencePoint,
+  SolverNodeResult,
+  SolverResults,
+  SolverStressResult,
+} from "@shared/solver";
 import { BarChart3, TrendingUp, Download, ChevronLeft } from "lucide-react";
+
+interface ChartPoint {
+  x: number;
+  y: number;
+  series: string;
+  color: string;
+}
 
 // Simple canvas chart
 function LineChart({ data, title, xLabel, yLabel }: {
-  data: { x: number; y: number; series: string; color: string }[];
+  data: ChartPoint[];
   title: string; xLabel: string; yLabel: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -128,9 +141,8 @@ function LineChart({ data, title, xLabel, yLabel }: {
 }
 
 // Kirsch stress distribution chart
-function KirschChart({ results, loadMag, holeRadius }: { results: any; loadMag: number; holeRadius: number }) {
+function KirschChart({ loadMag, holeRadius }: { loadMag: number; holeRadius: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [useQuery2] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -144,7 +156,7 @@ function KirschChart({ results, loadMag, holeRadius }: { results: any; loadMag: 
     ctx.fillStyle = "hsl(217,33%,14%)";
     ctx.fillRect(0, 0, cw, ch);
 
-    const a = holeRadius, sigma = loadMag;
+    const sigma = loadMag;
 
     // Generate Kirsch analytical curve
     const nPts = 100;
@@ -231,13 +243,12 @@ function KirschChart({ results, loadMag, holeRadius }: { results: any; loadMag: 
       ctx.fillText(y.toFixed(0), pad.l - 6, cy + 3);
     }
 
-  }, [results, loadMag, holeRadius]);
+  }, [loadMag, holeRadius]);
 
   return <canvas ref={canvasRef} width={560} height={280} className="w-full rounded-md border border-border" />;
 }
 
-function NodeTable({ results }: { results: any }) {
-  if (!results?.nodes) return null;
+function NodeTable({ results }: { results: SolverResults }) {
   const nodes = results.nodes.slice(0, 20);
   return (
     <div className="overflow-x-auto">
@@ -250,14 +261,14 @@ function NodeTable({ results }: { results: any }) {
           </tr>
         </thead>
         <tbody>
-          {nodes.map((n: any) => (
-            <tr key={n.id} className="border-b border-border/40 hover:bg-secondary/30">
-              <td className="py-1.5 px-2 text-muted-foreground">{n.id}</td>
-              <td className="py-1.5 px-2">{n.x.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{n.y.toFixed(3)}</td>
-              <td className="py-1.5 px-2 text-primary">{n.ux.toExponential(3)}</td>
-              <td className="py-1.5 px-2 text-primary">{n.uy.toExponential(3)}</td>
-              <td className="py-1.5 px-2 text-accent">{Math.sqrt(n.ux**2 + n.uy**2).toExponential(3)}</td>
+          {nodes.map((node: SolverNodeResult) => (
+            <tr key={node.id} className="border-b border-border/40 hover:bg-secondary/30">
+              <td className="py-1.5 px-2 text-muted-foreground">{node.id}</td>
+              <td className="py-1.5 px-2">{node.x.toFixed(3)}</td>
+              <td className="py-1.5 px-2">{node.y.toFixed(3)}</td>
+              <td className="py-1.5 px-2 text-primary">{node.ux.toExponential(3)}</td>
+              <td className="py-1.5 px-2 text-primary">{node.uy.toExponential(3)}</td>
+              <td className="py-1.5 px-2 text-accent">{Math.sqrt(node.ux ** 2 + node.uy ** 2).toExponential(3)}</td>
             </tr>
           ))}
         </tbody>
@@ -269,8 +280,7 @@ function NodeTable({ results }: { results: any }) {
   );
 }
 
-function ElementTable({ results }: { results: any }) {
-  if (!results?.stresses) return null;
+function ElementTable({ results }: { results: SolverResults }) {
   const elems = results.stresses.slice(0, 20);
   return (
     <div className="overflow-x-auto">
@@ -283,15 +293,15 @@ function ElementTable({ results }: { results: any }) {
           </tr>
         </thead>
         <tbody>
-          {elems.map((s: any) => (
-            <tr key={s.elementId} className="border-b border-border/40 hover:bg-secondary/30">
-              <td className="py-1.5 px-2 text-muted-foreground">{s.elementId}</td>
-              <td className="py-1.5 px-2">{s.cx.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{s.cy.toFixed(3)}</td>
-              <td className="py-1.5 px-2">{s.sxx.toFixed(2)}</td>
-              <td className="py-1.5 px-2">{s.syy.toFixed(2)}</td>
-              <td className="py-1.5 px-2">{s.sxy.toFixed(2)}</td>
-              <td className="py-1.5 px-2 font-bold text-primary">{s.vonMises.toFixed(2)}</td>
+          {elems.map((stress: SolverStressResult) => (
+            <tr key={stress.elementId} className="border-b border-border/40 hover:bg-secondary/30">
+              <td className="py-1.5 px-2 text-muted-foreground">{stress.elementId}</td>
+              <td className="py-1.5 px-2">{stress.cx.toFixed(3)}</td>
+              <td className="py-1.5 px-2">{stress.cy.toFixed(3)}</td>
+              <td className="py-1.5 px-2">{stress.sxx.toFixed(2)}</td>
+              <td className="py-1.5 px-2">{stress.syy.toFixed(2)}</td>
+              <td className="py-1.5 px-2">{stress.sxy.toFixed(2)}</td>
+              <td className="py-1.5 px-2 font-bold text-primary">{stress.vonMises.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
@@ -313,13 +323,21 @@ export default function Results() {
     enabled: !!selectedId,
   });
 
-  const results = analysis?.results as any;
+  const results = (analysis?.results as SolverResults | null) ?? null;
 
   const exportCSV = () => {
     if (!results?.stresses) return;
     const rows = [
       ["Element", "cx", "cy", "sxx", "syy", "sxy", "vonMises"],
-      ...results.stresses.map((s: any) => [s.elementId, s.cx, s.cy, s.sxx, s.syy, s.sxy, s.vonMises]),
+      ...results.stresses.map((stress) => [
+        stress.elementId,
+        stress.cx,
+        stress.cy,
+        stress.sxx,
+        stress.syy,
+        stress.sxy,
+        stress.vonMises,
+      ]),
     ];
     const csv = rows.map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -345,17 +363,17 @@ export default function Results() {
   }
 
   // Build convergence chart data
-  const convergenceData = (results.convergenceData || []).flatMap((d: any) => {
-    const color = d.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
-    const seriesKey = d.method.includes("TK") ? "TK-FEM" : "Standard FEM";
-    return [{ x: d.nElem, y: d.error, series: seriesKey, color }];
+  const convergenceData = results.convergenceData.flatMap((point: SolverConvergencePoint) => {
+    const color = point.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
+    const seriesKey = point.method.includes("TK") ? "TK-FEM" : "Standard FEM";
+    return [{ x: point.nElem, y: point.error, series: seriesKey, color }];
   });
 
   // SCF convergence
-  const scfData = (results.convergenceData || []).flatMap((d: any) => {
-    const color = d.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
-    const seriesKey = d.method.includes("TK") ? "TK-FEM" : "Standard FEM";
-    return [{ x: d.nElem, y: d.scf, series: seriesKey, color }];
+  const scfData = results.convergenceData.flatMap((point: SolverConvergencePoint) => {
+    const color = point.method.includes("TK") ? "hsl(38,92%,55%)" : "hsl(199,89%,48%)";
+    const seriesKey = point.method.includes("TK") ? "TK-FEM" : "Standard FEM";
+    return [{ x: point.nElem, y: point.scf, series: seriesKey, color }];
   });
 
   return (
@@ -388,7 +406,12 @@ export default function Results() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
             { label: "SCF K_t (TK-FEM)", value: results.kirschSCF?.toFixed(4), sub: "Kirsch exact = 3.0000", color: "primary" },
-            { label: "Error vs Kirsch", value: results.kirschError?.toFixed(2) + "%", sub: "Relative", color: results.kirschError < 5 ? "chart-3" : "chart-5" },
+            {
+              label: "Error vs Kirsch",
+              value: `${(results.kirschError ?? 0).toFixed(2)}%`,
+              sub: "Relative",
+              color: (results.kirschError ?? Number.POSITIVE_INFINITY) < 5 ? "chart-3" : "chart-5",
+            },
             { label: "Max von Mises", value: results.maxVonMises?.toFixed(2), sub: "MPa", color: "accent" },
             { label: "Max |u|", value: results.maxDisp?.toExponential(3), sub: "mm", color: "foreground" },
           ].map(({ label, value, sub, color }) => (
@@ -453,7 +476,7 @@ export default function Results() {
               <CardTitle className="text-sm">Kirsch Analytical Solution — σ_θθ at Hole Boundary (r = a)</CardTitle>
             </CardHeader>
             <CardContent>
-              <KirschChart results={results} loadMag={analysis.loadMagnitude} holeRadius={analysis.holeRadius} />
+              <KirschChart loadMag={analysis.loadMagnitude} holeRadius={analysis.holeRadius} />
               <div className="mt-4 bg-secondary/40 rounded-md p-3 text-xs font-mono space-y-1">
                 <div className="text-muted-foreground">Kirsch (1898) analytical solution — plate with circular hole, uniaxial tension σ∞:</div>
                 <div className="text-foreground mt-2">σ_θθ(a, θ) = σ∞ · (1 − 2cos2θ)</div>

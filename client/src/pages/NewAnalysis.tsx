@@ -13,26 +13,61 @@ import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { Info, Cpu } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import type { Project } from "@shared/schema";
+import type { Analysis, Project } from "@shared/schema";
 
-const schema = z.object({
-  projectId: z.coerce.number().min(1, "Select a project"),
-  name: z.string().min(1, "Required"),
-  domainType: z.enum(["rectangle", "circle_hole"]),
-  domainWidth: z.coerce.number().min(1).max(1000),
-  domainHeight: z.coerce.number().min(1).max(1000),
-  holeRadius: z.coerce.number().min(0).max(50),
-  meshNx: z.coerce.number().int().min(1).max(20),
-  meshNy: z.coerce.number().int().min(1).max(20),
-  youngModulus: z.coerce.number().min(1),
-  poissonRatio: z.coerce.number().min(0).max(0.499),
-  planeType: z.enum(["plane_stress", "plane_strain"]),
-  loadType: z.enum(["uniform_tension", "point_load", "shear"]),
-  loadMagnitude: z.coerce.number().min(0),
-  magnusTruncation: z.coerce.number().int().min(1).max(5),
-});
+const schema = z
+  .object({
+    projectId: z.coerce.number().min(1, "Select a project"),
+    name: z.string().min(1, "Required"),
+    domainType: z.enum(["rectangle", "circle_hole"]),
+    domainWidth: z.coerce.number().min(1).max(1000),
+    domainHeight: z.coerce.number().min(1).max(1000),
+    holeRadius: z.coerce.number().min(0).max(50),
+    meshNx: z.coerce.number().int().min(1).max(20),
+    meshNy: z.coerce.number().int().min(1).max(20),
+    youngModulus: z.coerce.number().min(1),
+    poissonRatio: z.coerce.number().min(0).max(0.499),
+    planeType: z.enum(["plane_stress", "plane_strain"]),
+    loadType: z.enum(["uniform_tension", "point_load", "shear"]),
+    loadMagnitude: z.coerce.number().min(0),
+    magnusTruncation: z.coerce.number().int().min(1).max(5),
+  })
+  .superRefine((value, ctx) => {
+    if (value.domainType !== "circle_hole") {
+      return;
+    }
+
+    if (value.holeRadius <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Hole radius must be greater than zero",
+        path: ["holeRadius"],
+      });
+    }
+
+    if (value.holeRadius >= Math.min(value.domainWidth, value.domainHeight)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Hole radius must be smaller than the plate dimensions",
+        path: ["holeRadius"],
+      });
+    }
+  });
 
 type FormData = z.infer<typeof schema>;
+type DomainType = FormData["domainType"];
+type PlaneType = FormData["planeType"];
+type LoadType = FormData["loadType"];
+
+function getHashSearchParam(name: string) {
+  const hash = window.location.hash;
+  const queryStart = hash.indexOf("?");
+  if (queryStart === -1) {
+    return null;
+  }
+
+  return new URLSearchParams(hash.slice(queryStart + 1)).get(name);
+}
 
 // Live mesh preview canvas
 function MeshPreviewCanvas({ nx, ny, W, H, holeRadius, domainType }: {
@@ -87,9 +122,12 @@ function MeshPreviewCanvas({ nx, ny, W, H, holeRadius, domainType }: {
 
     // Hole
     if (domainType === "circle_hole" && holeRadius > 0) {
-      const cx = pw / 2, cy = ph / 2;
       const r = holeRadius * sc;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+      ctx.beginPath();
+      ctx.moveTo(0, ph);
+      ctx.lineTo(r, ph);
+      ctx.arc(0, ph, r, 0, -Math.PI / 2, true);
+      ctx.lineTo(0, ph);
       ctx.fillStyle = "hsl(217,33%,11%)";
       ctx.fill();
       ctx.strokeStyle = "hsl(38,92%,55%)";
@@ -128,7 +166,7 @@ export default function NewAnalysis() {
   const form = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      projectId: undefined as any,
+      projectId: 0,
       name: "Kirsch Plate Analysis",
       domainType: "circle_hole",
       domainWidth: 10,
@@ -147,10 +185,30 @@ export default function NewAnalysis() {
 
   const watchValues = form.watch();
 
+  useEffect(() => {
+    if (form.getValues("projectId")) {
+      return;
+    }
+
+    const projectIdFromHash = Number(getHashSearchParam("projectId"));
+    const fallbackProjectId =
+      Number.isInteger(projectIdFromHash) && projectIdFromHash > 0
+        ? projectIdFromHash
+        : projects.length === 1
+          ? projects[0].id
+          : undefined;
+
+    if (!fallbackProjectId || !projects.some((project) => project.id === fallbackProjectId)) {
+      return;
+    }
+
+    form.setValue("projectId", fallbackProjectId, { shouldValidate: true });
+  }, [form, projects]);
+
   const createAnalysis = useMutation({
     mutationFn: (data: FormData) => apiRequest("POST", "/api/analyses", data),
-    onSuccess: async (res: any) => {
-      const analysis = await res.json();
+    onSuccess: async (res: Response) => {
+      const analysis = (await res.json()) as Analysis;
       queryClient.invalidateQueries({ queryKey: ["/api/analyses"] });
       toast({ title: "Analysis created", description: "Opening in solver..." });
       navigate(`/solver/${analysis.id}`);
@@ -209,14 +267,14 @@ export default function NewAnalysis() {
                     <Label className="text-xs text-muted-foreground mb-1.5 block">Domain Type</Label>
                     <Select
                       value={watchValues.domainType}
-                      onValueChange={v => form.setValue("domainType", v as any)}
+                      onValueChange={(value) => form.setValue("domainType", value as DomainType)}
                     >
                       <SelectTrigger data-testid="select-domain-type">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="rectangle">Rectangle</SelectItem>
-                        <SelectItem value="circle_hole">Rectangle with Circular Hole (Kirsch)</SelectItem>
+                        <SelectItem value="circle_hole">Quarter Plate with Circular Hole (Kirsch)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -224,7 +282,7 @@ export default function NewAnalysis() {
                     <Label className="text-xs text-muted-foreground mb-1.5 block">Plane Type</Label>
                     <Select
                       value={watchValues.planeType}
-                      onValueChange={v => form.setValue("planeType", v as any)}
+                      onValueChange={(value) => form.setValue("planeType", value as PlaneType)}
                     >
                       <SelectTrigger data-testid="select-plane-type">
                         <SelectValue />
@@ -313,7 +371,7 @@ export default function NewAnalysis() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1.5 block">Load Type</Label>
-                    <Select value={watchValues.loadType} onValueChange={v => form.setValue("loadType", v as any)}>
+                    <Select value={watchValues.loadType} onValueChange={(value) => form.setValue("loadType", value as LoadType)}>
                       <SelectTrigger data-testid="select-load-type">
                         <SelectValue />
                       </SelectTrigger>
@@ -381,7 +439,7 @@ export default function NewAnalysis() {
                 <div className="mt-3 space-y-1.5 text-xs text-muted-foreground font-mono">
                   <div className="flex justify-between"><span>Domain:</span><span>{watchValues.domainWidth}×{watchValues.domainHeight} mm</span></div>
                   {watchValues.domainType === "circle_hole" && (
-                    <div className="flex justify-between"><span>L/a ratio:</span><span>{(watchValues.domainWidth / 2 / watchValues.holeRadius).toFixed(1)}</span></div>
+                    <div className="flex justify-between"><span>W/a ratio:</span><span>{(watchValues.domainWidth / watchValues.holeRadius).toFixed(1)}</span></div>
                   )}
                   <div className="flex justify-between"><span>Elements:</span><span>{watchValues.meshNx * watchValues.meshNy}</span></div>
                   <div className="flex justify-between"><span>DOFs:</span><span>{(watchValues.meshNx + 1) * (watchValues.meshNy + 1) * 2}</span></div>

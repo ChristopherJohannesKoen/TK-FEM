@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { Play, RefreshCw, AlertCircle, CheckCircle2, Clock, ExternalLink } from "lucide-react";
+import { Play, RefreshCw, Clock, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
 import type { Analysis } from "@shared/schema";
+import type { SolverResults, StressField } from "@shared/solver";
 import { useEffect, useRef, useState } from "react";
 
 // Stress color map: blue → cyan → green → yellow → orange → red
@@ -35,11 +36,10 @@ function stressColor(value: number, min: number, max: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
-function StressContourCanvas({ results, field }: { results: any; field: "vonMises" | "sxx" | "syy" | "sxy" }) {
+function StressContourCanvas({ results, field }: { results: SolverResults; field: StressField }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!results?.stresses || !results?.nodes) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
@@ -51,8 +51,8 @@ function StressContourCanvas({ results, field }: { results: any; field: "vonMise
 
     if (!stresses.length) return;
 
-    const allX = nodes.map((n: any) => n.x);
-    const allY = nodes.map((n: any) => n.y);
+    const allX = nodes.map((node) => node.x);
+    const allY = nodes.map((node) => node.y);
     const xMin = Math.min(...allX), xMax = Math.max(...allX);
     const yMin = Math.min(...allY), yMax = Math.max(...allY);
 
@@ -66,13 +66,8 @@ function StressContourCanvas({ results, field }: { results: any; field: "vonMise
       cy: ch - pad - (y - yMin) * sc,
     });
 
-    const values = stresses.map((s: any) => s[field] as number);
+    const values = stresses.map((stress) => stress[field]);
     const vMin = Math.min(...values), vMax = Math.max(...values);
-
-    // Draw elements as filled quads
-    // Build a node map for displacement
-    const nodeMap = new Map<number, any>();
-    for (const n of nodes) nodeMap.set(n.id, n);
 
     // Draw each element
     ctx.save();
@@ -129,7 +124,7 @@ function StressContourCanvas({ results, field }: { results: any; field: "vonMise
 }
 
 function SolverLog({ analysis, isRunning }: { analysis: Analysis; isRunning: boolean }) {
-  const results = analysis.results as any;
+  const results = (analysis.results as SolverResults | null) ?? null;
   const lines: string[] = [
     `[TK-FEM] Analysis: "${analysis.name}"`,
     `[MESH]   Domain: ${analysis.domainWidth}×${analysis.domainHeight}mm, ${analysis.domainType === "circle_hole" ? `hole r=${analysis.holeRadius}mm` : "rect"}`,
@@ -185,7 +180,7 @@ export default function Solver() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [stressField, setStressField] = useState<"vonMises" | "sxx" | "syy" | "sxy">("vonMises");
+  const [stressField, setStressField] = useState<StressField>("vonMises");
   const [isRunning, setIsRunning] = useState(false);
 
   const { data: analyses = [] } = useQuery<Analysis[]>({ queryKey: ["/api/analyses"] });
@@ -212,13 +207,13 @@ export default function Solver() {
       toast({ title: "Analysis complete" });
       setIsRunning(false);
     },
-    onError: (err: any) => {
+    onError: () => {
       toast({ title: "Solver error", variant: "destructive" });
       setIsRunning(false);
     },
   });
 
-  const results = analysis?.results as any;
+  const results = (analysis?.results as SolverResults | null) ?? null;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">

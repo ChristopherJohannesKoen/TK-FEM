@@ -1,3 +1,5 @@
+import type { SolverParams, SolverResults } from "@shared/solver";
+
 /**
  * TK-FEM Solver Engine
  * Implements the Trefftz-Koen Hybrid Finite Element Method
@@ -343,6 +345,54 @@ function generateRectMesh(W: number, H: number, nx: number, ny: number): Mesh {
       elements.push({ id: j * nx + i, nodes: [n0, n1, n2, n3], cx, cy, hx: W / (2 * nx), hy: H / (2 * ny) });
     }
   }
+  return { nodes, elements };
+}
+
+function generateQuarterHoleMesh(
+  W: number,
+  H: number,
+  holeRadius: number,
+  nx: number,
+  ny: number,
+): Mesh {
+  const baseMesh = generateRectMesh(W, H, nx, ny);
+  const keptElements = baseMesh.elements.filter((element) => {
+    const corners = element.nodes.map((nodeId) => baseMesh.nodes[nodeId]);
+    return corners.every((node) => Math.hypot(node.x, node.y) >= holeRadius);
+  });
+
+  if (!keptElements.length) {
+    throw new Error("Hole radius is too large for the selected mesh.");
+  }
+
+  const usedNodeIds = new Set<number>();
+  for (const element of keptElements) {
+    for (const nodeId of element.nodes) {
+      usedNodeIds.add(nodeId);
+    }
+  }
+
+  const nodeIdMap = new Map<number, number>();
+  const nodes = baseMesh.nodes
+    .filter((node) => usedNodeIds.has(node.id))
+    .map((node, index) => {
+      nodeIdMap.set(node.id, index);
+      return { ...node, id: index };
+    });
+
+  const elements = keptElements.map((element, index) => ({
+    ...element,
+    id: index,
+    nodes: element.nodes.map((nodeId) => {
+      const mappedNodeId = nodeIdMap.get(nodeId);
+      if (mappedNodeId === undefined) {
+        throw new Error("Failed to remap quarter-hole mesh nodes.");
+      }
+
+      return mappedNodeId;
+    }),
+  }));
+
   return { nodes, elements };
 }
 
@@ -715,38 +765,28 @@ export function kirschStress(x: number, y: number, a: number, sigma_inf: number)
 }
 
 // ── Main solver entry point ───────────────────────────────────────────────────
-export interface SolverParams {
-  domainType: "rectangle" | "circle_hole";
-  W: number; H: number; holeRadius: number;
-  nx: number; ny: number;
-  E: number; nu: number;
-  planeType: "plane_stress" | "plane_strain";
-  loadType: string; loadMag: number;
-  magnusTrunc: number;
-}
-
-export interface SolverResults {
-  nodes: { id: number; x: number; y: number; ux: number; uy: number }[];
-  stresses: { elementId: number; cx: number; cy: number; sxx: number; syy: number; sxy: number; vonMises: number }[];
-  maxDisp: number; maxVonMises: number;
-  kirschSCF?: number;
-  kirschError?: number;
-  magnusOrder: number;
-  nElements: number; nNodes: number; nDOF: number;
-  convergenceData: { method: string; nElem: number; scf: number; error: number }[];
-  stressConcentrationFactor: number;
-  executionTimeMs: number;
-}
-
 export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   const t0 = Date.now();
   const { W, H, holeRadius, nx, ny, E, nu, planeType, loadType, loadMag, magnusTrunc } = params;
 
+  if (params.domainType === "circle_hole") {
+    if (holeRadius <= 0) {
+      throw new Error("Hole radius must be greater than zero for the Kirsch benchmark.");
+    }
+
+    if (holeRadius >= Math.min(W, H)) {
+      throw new Error("Hole radius must be smaller than the plate dimensions.");
+    }
+  }
+
   // Generate mesh
-  const mesh = generateRectMesh(W, H, nx, ny);
+  const mesh =
+    params.domainType === "circle_hole"
+      ? generateQuarterHoleMesh(W, H, holeRadius, nx, ny)
+      : generateRectMesh(W, H, nx, ny);
 
   // Assemble global stiffness
-  const { K, F, nodeMap } = assembleFEM(mesh, E, nu, planeType, magnusTrunc);
+  const { K, F } = assembleFEM(mesh, E, nu, planeType, magnusTrunc);
 
   // Apply boundary conditions
   applyBoundaryConditions(K, F, mesh.nodes, loadType, loadMag, params.domainType, holeRadius);

@@ -14,6 +14,8 @@ import { Plus, Trash2, FlaskConical, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { Project, Analysis } from "@shared/schema";
 
+type CreateProjectPayload = Pick<Project, "name" | "description">;
+
 export default function Projects() {
   const { toast } = useToast();
   const [showNew, setShowNew] = useState(false);
@@ -21,10 +23,12 @@ export default function Projects() {
   const { data: projects = [], isLoading } = useQuery<Project[]>({ queryKey: ["/api/projects"] });
   const { data: analyses = [] } = useQuery<Analysis[]>({ queryKey: ["/api/analyses"] });
 
-  const form = useForm({ defaultValues: { name: "", description: "" } });
+  const form = useForm<CreateProjectPayload>({
+    defaultValues: { name: "", description: "" },
+  });
 
   const createProject = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/projects", data),
+    mutationFn: (data: CreateProjectPayload) => apiRequest("POST", "/api/projects", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/projects"] });
       setShowNew(false);

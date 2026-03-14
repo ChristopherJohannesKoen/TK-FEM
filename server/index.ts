@@ -6,6 +6,10 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Internal Server Error";
+}
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -36,7 +40,7 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedJsonResponse: unknown;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
@@ -62,9 +66,14 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  app.use((err: { status?: number; statusCode?: number } | Error | unknown, _req: Request, res: Response, next: NextFunction) => {
+    const status =
+      typeof err === "object" && err !== null && "status" in err && typeof err.status === "number"
+        ? err.status
+        : typeof err === "object" && err !== null && "statusCode" in err && typeof err.statusCode === "number"
+          ? err.statusCode
+          : 500;
+    const message = getErrorMessage(err);
 
     console.error("Internal Server Error:", err);
 
