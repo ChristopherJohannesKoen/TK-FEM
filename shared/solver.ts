@@ -1,6 +1,7 @@
 export type MagnusMode = "auto" | "manual";
 export type MagnusAnalysisBackend = "sympy" | "numeric" | "manual";
 export type MagnusStrategy = "finite_closure" | "truncated_magnus" | "manual_truncation";
+export type AnalysisMode = "meshed" | "functionized";
 
 export interface SolverNodeResult {
   id: number;
@@ -49,6 +50,34 @@ export interface SolverBoundarySample {
   tractionTangential: number;
 }
 
+export interface SolverBoundaryFrameResult {
+  id: number;
+  x: number;
+  y: number;
+  ux: number;
+  uy: number;
+  uMagnitude: number;
+  tractionX: number;
+  tractionY: number;
+  tractionNormal: number;
+  tractionTangential: number;
+  boundaryType: string;
+  curveLabel: string;
+  arcLength: number;
+  normalizedArcLength: number;
+}
+
+export interface SolverGeometryPoint {
+  x: number;
+  y: number;
+  ux: number;
+  uy: number;
+  boundaryType: string;
+  curveLabel: string;
+  arcLength: number;
+  normalizedArcLength: number;
+}
+
 export interface SolverConvergencePoint {
   method: string;
   nElem: number;
@@ -81,6 +110,7 @@ export interface MagnusAnalysis {
 }
 
 export interface SolverParams {
+  analysisMode: AnalysisMode;
   domainType: "rectangle" | "circle_hole";
   W: number;
   H: number;
@@ -94,14 +124,28 @@ export interface SolverParams {
   loadMag: number;
   magnusTrunc: number;
   magnusMode: MagnusMode;
+  boundaryQuadratureOrder: number;
+}
+
+export interface FunctionizedDiagnostics {
+  boundaryFrameCount: number;
+  sourcePointCount: number;
+  boundaryQuadratureOrder: number;
+  sourceOffset: number;
+  maxBoundaryResidual: number;
+  rmsBoundaryResidual: number;
 }
 
 export interface SolverResults {
+  analysisMode: AnalysisMode;
   nodes: SolverNodeResult[];
   stresses: SolverStressResult[];
   meshElements: SolverMeshElement[];
   fieldSamples: SolverFieldSample[];
   holeBoundarySamples: SolverBoundarySample[];
+  boundaryFrames: SolverBoundaryFrameResult[];
+  geometryOutline: SolverGeometryPoint[];
+  functionizedDiagnostics: FunctionizedDiagnostics | null;
   maxDisp: number;
   maxVonMises: number;
   kirschSCF?: number;

@@ -7,6 +7,7 @@ import type {
   SolverResults,
 } from "@shared/solver";
 import { analyzeMagnusConvergence } from "./magnus-analysis";
+import { runFunctionizedSingleDomainSolve } from "./functionized-single-domain";
 
 type Mat = number[];
 type DenseMatrix = number[][];
@@ -1178,7 +1179,21 @@ function benchmarkLevels(nx: number, ny: number) {
 
 export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   const startedAt = Date.now();
-  const { W, H, holeRadius, nx, ny, E, nu, planeType, loadType, loadMag, magnusTrunc, magnusMode } = params;
+  const {
+    W,
+    H,
+    holeRadius,
+    nx,
+    ny,
+    E,
+    nu,
+    planeType,
+    loadType,
+    loadMag,
+    magnusTrunc,
+    magnusMode,
+    boundaryQuadratureOrder,
+  } = params;
 
   if (params.domainType === "circle_hole") {
     if (holeRadius <= 0) {
@@ -1189,23 +1204,64 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
     }
   }
 
-  const mesh = generateMesh({ domainType: params.domainType, W, H, holeRadius, nx, ny });
-  const representativeElement = mesh.elements[0];
-  if (!representativeElement) {
-    throw new Error("Mesh generation produced no elements.");
-  }
-
   const transport = buildTransportOperators(E, nu, planeType);
   const constitutive = constitutiveMatrix(E, nu, planeType);
   const magnusAnalysis = await analyzeMagnusConvergence({
     Ax: transport.Ax,
     Ay: transport.Ay,
     n: transport.n,
-    hx: representativeElement.characteristicSize,
-    hy: representativeElement.characteristicSize,
+    hx: params.analysisMode === "functionized" ? W : generateMesh({ domainType: params.domainType, W, H, holeRadius, nx, ny }).elements[0]?.characteristicSize ?? W,
+    hy: params.analysisMode === "functionized" ? H : generateMesh({ domainType: params.domainType, W, H, holeRadius, nx, ny }).elements[0]?.characteristicSize ?? H,
     requestedMagnusOrder: magnusTrunc,
     mode: magnusMode,
   });
+
+  if (params.analysisMode === "functionized") {
+    const functionized = runFunctionizedSingleDomainSolve({
+      domainType: params.domainType,
+      W,
+      H,
+      holeRadius,
+      nx,
+      ny,
+      E,
+      nu,
+      planeType,
+      loadType,
+      loadMag,
+      boundaryQuadratureOrder,
+    });
+
+    return {
+      analysisMode: "functionized",
+      nodes: functionized.nodes,
+      stresses: functionized.stresses,
+      meshElements: functionized.meshElements,
+      fieldSamples: functionized.fieldSamples,
+      holeBoundarySamples: functionized.holeBoundarySamples,
+      boundaryFrames: functionized.boundaryFrames,
+      geometryOutline: functionized.geometryOutline,
+      functionizedDiagnostics: functionized.functionizedDiagnostics,
+      maxDisp: functionized.maxDisp,
+      maxVonMises: functionized.maxVonMises,
+      kirschSCF: functionized.kirschSCF,
+      kirschError: functionized.kirschError,
+      magnusOrder: magnusAnalysis.appliedMagnusOrder,
+      nElements: functionized.nElements,
+      nNodes: functionized.nNodes,
+      nDOF: functionized.nDOF,
+      convergenceData: functionized.convergenceData,
+      stressConcentrationFactor: functionized.stressConcentrationFactor,
+      magnusAnalysis,
+      executionTimeMs: Date.now() - startedAt,
+    };
+  }
+
+  const mesh = generateMesh({ domainType: params.domainType, W, H, holeRadius, nx, ny });
+  const representativeElement = mesh.elements[0];
+  if (!representativeElement) {
+    throw new Error("Mesh generation produced no elements.");
+  }
 
   const tk = solveTKCase(
     mesh,
@@ -1248,11 +1304,15 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
   }
 
   return {
+    analysisMode: "meshed",
     nodes: tk.nodes,
     stresses: tk.stresses,
     meshElements: tk.mesh.elements.map((element) => ({ id: element.id, nodeIds: [...element.nodeIds] })),
     fieldSamples: tk.fieldSamples,
     holeBoundarySamples: tk.holeBoundarySamples,
+    boundaryFrames: [],
+    geometryOutline: [],
+    functionizedDiagnostics: null,
     maxDisp: tk.maxDisp,
     maxVonMises: tk.maxVonMises,
     kirschSCF: tk.kirschSCF,

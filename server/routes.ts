@@ -111,6 +111,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
     try {
       const params: SolverParams = {
+        analysisMode: analysis.analysisMode as SolverParams["analysisMode"],
         domainType: analysis.domainType as "rectangle" | "circle_hole",
         W: analysis.domainWidth,
         H: analysis.domainHeight,
@@ -124,6 +125,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
         loadMag: analysis.loadMagnitude,
         magnusTrunc: analysis.magnusTruncation,
         magnusMode: analysis.magnusMode as SolverParams["magnusMode"],
+        boundaryQuadratureOrder: analysis.boundaryQuadratureOrder,
       };
       const results = await runTKFEM(params);
 
@@ -142,6 +144,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   // ── Quick solve (no persistence) ─────────────────────────────────────────
   const quickSolveSchema = z.object({
+    analysisMode: z.enum(["meshed", "functionized"]).default("meshed"),
     domainType: z.enum(["rectangle", "circle_hole"]).default("circle_hole"),
     W: z.number().min(1).max(1000).default(10),
     H: z.number().min(1).max(1000).default(10),
@@ -155,6 +158,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
     loadMag: z.number().default(100),
     magnusTrunc: z.number().int().min(1).max(5).default(3),
     magnusMode: z.enum(["auto", "manual"]).default("auto"),
+    boundaryQuadratureOrder: z.number().int().min(2).max(24).default(8),
   });
 
   app.post("/api/solve", async (req, res) => {

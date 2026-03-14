@@ -31,6 +31,7 @@ import { MagnusAnalysisPanel } from "@/components/results/magnus-panel";
 import type { Analysis } from "@shared/schema";
 import type {
   DeflectionField,
+  SolverBoundaryFrameResult,
   SolverConvergencePoint,
   SolverNodeResult,
   SolverResults,
@@ -156,6 +157,20 @@ function buildDeflectionProfile(results: SolverResults, field: DeflectionField) 
     .map((node) => ({
       x: node.y,
       value: node[field],
+    }));
+}
+
+function buildBoundaryResponseData(results: SolverResults) {
+  return results.boundaryFrames
+    .slice()
+    .sort((left, right) => left.normalizedArcLength - right.normalizedArcLength)
+    .map((frame) => ({
+      x: Number((frame.normalizedArcLength * 100).toFixed(3)),
+      ux: frame.ux,
+      uy: frame.uy,
+      uMagnitude: frame.uMagnitude,
+      tractionNormal: frame.tractionNormal,
+      tractionTangential: frame.tractionTangential,
     }));
 }
 
@@ -427,6 +442,50 @@ function ElementTable({ stresses }: { stresses: SolverStressResult[] }) {
   );
 }
 
+function BoundaryFrameTable({ boundaryFrames }: { boundaryFrames: SolverBoundaryFrameResult[] }) {
+  const preview = boundaryFrames.slice(0, 60);
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th className="py-2 pr-4">Frame</th>
+            <th className="py-2 pr-4">Boundary</th>
+            <th className="py-2 pr-4">s/L</th>
+            <th className="py-2 pr-4">x</th>
+            <th className="py-2 pr-4">y</th>
+            <th className="py-2 pr-4">u_x</th>
+            <th className="py-2 pr-4">u_y</th>
+            <th className="py-2 pr-4">t_n</th>
+            <th className="py-2 pr-4">t_t</th>
+          </tr>
+        </thead>
+        <tbody>
+          {preview.map((frame) => (
+            <tr key={frame.id} className="border-b border-border/50 last:border-0">
+              <td className="py-2 pr-4 font-mono text-muted-foreground">{frame.id}</td>
+              <td className="py-2 pr-4">{frame.boundaryType}</td>
+              <td className="py-2 pr-4 font-mono">{frame.normalizedArcLength.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.x.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.y.toFixed(4)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.ux.toExponential(3)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.uy.toExponential(3)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.tractionNormal.toFixed(3)}</td>
+              <td className="py-2 pr-4 font-mono">{frame.tractionTangential.toFixed(3)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {boundaryFrames.length > preview.length ? (
+        <div className="pt-3 text-xs text-muted-foreground">
+          Showing {preview.length} of {boundaryFrames.length} boundary frames.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Results() {
   const { id } = useParams<{ id: string }>();
   const { data: analyses = [] } = useQuery<Analysis[]>({ queryKey: ["/api/analyses"] });
@@ -446,23 +505,39 @@ export default function Results() {
       return;
     }
 
-    const rows = [
-      ["elementId", "cx", "cy", "sxx", "syy", "sxy", "vonMises"],
-      ...results.stresses.map((stress) => [
-        stress.elementId,
-        stress.cx,
-        stress.cy,
-        stress.sxx,
-        stress.syy,
-        stress.sxy,
-        stress.vonMises,
-      ]),
-    ];
+    const rows =
+      results.analysisMode === "functionized"
+        ? [
+            ["x", "y", "ux", "uy", "uMagnitude", "sxx", "syy", "sxy", "vonMises"],
+            ...results.fieldSamples.map((sample) => [
+              sample.x,
+              sample.y,
+              sample.ux,
+              sample.uy,
+              sample.uMagnitude,
+              sample.sxx,
+              sample.syy,
+              sample.sxy,
+              sample.vonMises,
+            ]),
+          ]
+        : [
+            ["elementId", "cx", "cy", "sxx", "syy", "sxy", "vonMises"],
+            ...results.stresses.map((stress) => [
+              stress.elementId,
+              stress.cx,
+              stress.cy,
+              stress.sxx,
+              stress.syy,
+              stress.sxy,
+              stress.vonMises,
+            ]),
+          ];
     const csv = rows.map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `tkfem-element-results-${selectedId}.csv`;
+    link.download = `tkfem-results-${selectedId}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -489,6 +564,7 @@ export default function Results() {
   const kirschBoundaryData = buildKirschBoundaryData(results, analysis.loadMagnitude);
   const stressProfile = buildStressProfile(results, analysis, stressField);
   const deflectionProfile = buildDeflectionProfile(results, deflectionField);
+  const boundaryResponseData = buildBoundaryResponseData(results);
   const magnusAnalysis = results.magnusAnalysis;
 
   return (
@@ -507,7 +583,9 @@ export default function Results() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            {results.nElements} elements, {results.nDOF} DOFs, effective Magnus order m = {results.magnusOrder}
+            {results.analysisMode === "functionized"
+              ? `${results.nElements} computational element, ${results.nNodes} boundary frames, ${results.nDOF} boundary DOFs, effective Magnus order m = ${results.magnusOrder}`
+              : `${results.nElements} elements, ${results.nDOF} DOFs, effective Magnus order m = ${results.magnusOrder}`}
             {results.executionTimeMs ? `, solved in ${results.executionTimeMs} ms` : ""}
           </p>
         </div>
@@ -518,8 +596,16 @@ export default function Results() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Peak von Mises" value={`${formatValue(results.maxVonMises)} MPa`} sublabel="Element stress envelope" />
-        <MetricCard label="Peak displacement" value={`${formatValue(results.maxDisp)} mm`} sublabel="Maximum nodal magnitude" />
+        <MetricCard
+          label="Peak von Mises"
+          value={`${formatValue(results.maxVonMises)} MPa`}
+          sublabel={results.analysisMode === "functionized" ? "Interior sample envelope" : "Element stress envelope"}
+        />
+        <MetricCard
+          label="Peak displacement"
+          value={`${formatValue(results.maxDisp)} mm`}
+          sublabel={results.analysisMode === "functionized" ? "Boundary and interior response" : "Maximum nodal magnitude"}
+        />
         <MetricCard
           label="Kirsch SCF"
           value={typeof results.kirschSCF === "number" ? formatValue(results.kirschSCF) : "n/a"}
@@ -541,6 +627,7 @@ export default function Results() {
       <Tabs defaultValue="plots">
         <TabsList className="flex flex-wrap">
           <TabsTrigger value="plots">Plots</TabsTrigger>
+          {results.analysisMode === "functionized" ? <TabsTrigger value="functionized">Functionized</TabsTrigger> : null}
           <TabsTrigger value="magnus">Magnus</TabsTrigger>
           <TabsTrigger value="convergence">Convergence</TabsTrigger>
           <TabsTrigger value="kirsch">Kirsch</TabsTrigger>
@@ -572,7 +659,9 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <StressContourCanvas results={results} field={stressField} />
                 <p className="text-xs text-muted-foreground">
-                  Stress contours are drawn from transport-evaluated interior field samples and overlaid on the active mesh.
+                  {results.analysisMode === "functionized"
+                    ? "Stress contours are drawn from interior samples generated by the functionized single-domain boundary solve."
+                    : "Stress contours are drawn from transport-evaluated interior field samples and overlaid on the active mesh."}
                 </p>
               </CardContent>
             </Card>
@@ -598,7 +687,9 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <DeflectionContourCanvas results={results} field={deflectionField} />
                 <p className="text-xs text-muted-foreground">
-                  Deflection contours are drawn from transport-evaluated field samples rather than element-centroid averaging.
+                  {results.analysisMode === "functionized"
+                    ? "Deflection contours are drawn from the one-domain functionized solve and overlaid on the exact boundary outline."
+                    : "Deflection contours are drawn from transport-evaluated field samples rather than element-centroid averaging."}
                 </p>
               </CardContent>
             </Card>
@@ -612,7 +703,9 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <DeformedShapeCanvas results={results} field={deflectionField} />
                 <p className="text-xs text-muted-foreground">
-                  The undeformed mesh is shown in the background; the foreground mesh is amplified for visual interpretation.
+                  {results.analysisMode === "functionized"
+                    ? "The undeformed and deformed exact boundary outlines are shown with amplified displacement for interpretation."
+                    : "The undeformed mesh is shown in the background; the foreground mesh is amplified for visual interpretation."}
                 </p>
               </CardContent>
             </Card>
@@ -640,6 +733,53 @@ export default function Results() {
           </div>
         </TabsContent>
 
+        {results.analysisMode === "functionized" ? (
+          <TabsContent value="functionized" className="mt-4 space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <MetricCard
+                label="Boundary frames"
+                value={`${results.functionizedDiagnostics?.boundaryFrameCount ?? results.boundaryFrames.length}`}
+                sublabel="Primary unknown stations on the exact boundary"
+              />
+              <MetricCard
+                label="Boundary quadrature"
+                value={`${results.functionizedDiagnostics?.boundaryQuadratureOrder ?? "n/a"}`}
+                sublabel="Oversampled enforcement order"
+              />
+              <MetricCard
+                label="Boundary residual"
+                value={results.functionizedDiagnostics ? formatValue(results.functionizedDiagnostics.maxBoundaryResidual) : "n/a"}
+                sublabel={results.functionizedDiagnostics ? `RMS ${formatValue(results.functionizedDiagnostics.rmsBoundaryResidual)}` : "No diagnostics"}
+              />
+            </div>
+
+            <ChartCard
+              title="Boundary displacement response"
+              data={boundaryResponseData}
+              series={[
+                { key: "ux", label: "u_x", color: "#38bdf8" },
+                { key: "uy", label: "u_y", color: "#f59e0b" },
+                { key: "uMagnitude", label: "|u|", color: "#22c55e" },
+              ]}
+              xLabel="Normalized boundary arc length [%]"
+              yLabel="Displacement [mm]"
+              footer="Response sampled directly on the exact functionized boundary."
+            />
+
+            <ChartCard
+              title="Boundary traction response"
+              data={boundaryResponseData}
+              series={[
+                { key: "tractionNormal", label: "Normal traction", color: "#f59e0b" },
+                { key: "tractionTangential", label: "Tangential traction", color: "#38bdf8" },
+              ]}
+              xLabel="Normalized boundary arc length [%]"
+              yLabel="Traction [MPa]"
+              footer="Natural and symmetry boundary conditions are enforced on the exact geometry without interior elements."
+            />
+          </TabsContent>
+        ) : null}
+
         <TabsContent value="magnus" className="mt-4">
           {magnusAnalysis ? (
             <MagnusAnalysisPanel analysis={magnusAnalysis} />
@@ -654,18 +794,22 @@ export default function Results() {
 
         <TabsContent value="convergence" className="mt-4 space-y-4">
           <ChartCard
-            title="Error versus element count"
+            title={results.analysisMode === "functionized" ? "Error versus boundary frame count" : "Error versus element count"}
             data={convergence.data}
             series={convergence.series}
-            xLabel="Element count"
+            xLabel={results.analysisMode === "functionized" ? "Boundary frame count" : "Element count"}
             yLabel="Error [%]"
-            footer="Convergence points are generated from actual benchmark solves on successively refined meshes for both TK-FEM and standard Q4 FEM."
+            footer={
+              results.analysisMode === "functionized"
+                ? "Convergence points are generated from actual functionized single-domain solves at increasing boundary resolution."
+                : "Convergence points are generated from actual benchmark solves on successively refined meshes for both TK-FEM and standard Q4 FEM."
+            }
           />
           <ChartCard
-            title="Stress concentration factor convergence"
+            title={results.analysisMode === "functionized" ? "Stress concentration convergence" : "Stress concentration factor convergence"}
             data={scfConvergence.data}
             series={scfConvergence.series}
-            xLabel="Element count"
+            xLabel={results.analysisMode === "functionized" ? "Boundary frame count" : "Element count"}
             yLabel="SCF"
             referenceLine={{ y: 3, label: "Kirsch exact" }}
             footer="SCF convergence is reported against the exact Kirsch value of 3.0 for a circular hole in an infinite plate."
@@ -717,10 +861,10 @@ export default function Results() {
         <TabsContent value="nodes" className="mt-4">
           <Card className="border-border bg-card">
             <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-sm">Nodal displacement table</CardTitle>
+              <CardTitle className="text-sm">{results.analysisMode === "functionized" ? "Boundary frame table" : "Nodal displacement table"}</CardTitle>
             </CardHeader>
             <CardContent>
-              <NodeTable nodes={results.nodes} />
+              {results.analysisMode === "functionized" ? <BoundaryFrameTable boundaryFrames={results.boundaryFrames} /> : <NodeTable nodes={results.nodes} />}
             </CardContent>
           </Card>
         </TabsContent>
@@ -728,7 +872,7 @@ export default function Results() {
         <TabsContent value="elements" className="mt-4">
           <Card className="border-border bg-card">
             <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-sm">Element stress table</CardTitle>
+              <CardTitle className="text-sm">{results.analysisMode === "functionized" ? "Interior sample table" : "Element stress table"}</CardTitle>
             </CardHeader>
             <CardContent>
               <ElementTable stresses={results.stresses} />

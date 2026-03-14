@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type {
   DeflectionField,
   SolverFieldSample,
+  SolverGeometryPoint,
   SolverMeshElement,
   SolverNodeResult,
   SolverResults,
@@ -259,6 +260,49 @@ function drawSampleField(
   }
 }
 
+function drawGeometryOutline(
+  ctx: CanvasRenderingContext2D,
+  projector: ReturnType<typeof createProjector>,
+  outline: SolverGeometryPoint[],
+  options?: {
+    deformed?: boolean;
+    amplification?: number;
+    valueForPoint?: (point: SolverGeometryPoint) => number;
+    range?: ScalarRange;
+  },
+) {
+  if (outline.length < 2) {
+    return;
+  }
+
+  const deformed = options?.deformed ?? false;
+  const amplification = options?.amplification ?? 1;
+  const valueForPoint = options?.valueForPoint;
+  const range = options?.range;
+
+  for (let index = 1; index < outline.length; index++) {
+    const previous = outline[index - 1];
+    const current = outline[index];
+    const pointA = projector.toCanvas(
+      previous.x + (deformed ? previous.ux * amplification : 0),
+      previous.y + (deformed ? previous.uy * amplification : 0),
+    );
+    const pointB = projector.toCanvas(
+      current.x + (deformed ? current.ux * amplification : 0),
+      current.y + (deformed ? current.uy * amplification : 0),
+    );
+    ctx.beginPath();
+    ctx.moveTo(pointA.x, pointA.y);
+    ctx.lineTo(pointB.x, pointB.y);
+    if (valueForPoint && range) {
+      const average = 0.5 * (valueForPoint(previous) + valueForPoint(current));
+      ctx.strokeStyle = colorForValue(average, range);
+      ctx.lineWidth = deformed ? 2 : 1;
+    }
+    ctx.stroke();
+  }
+}
+
 export function getStressFieldLabel(field: StressField) {
   switch (field) {
     case "sxx":
@@ -337,6 +381,10 @@ export function StressContourCanvas({ results, field }: { results: SolverResults
         ctx.closePath();
         ctx.stroke();
       }
+      if (!elements.length && results.geometryOutline.length) {
+        ctx.strokeStyle = "rgba(255,255,255,0.28)";
+        drawGeometryOutline(ctx, projector, results.geometryOutline);
+      }
     } else {
       drawElementPolygons(
         ctx,
@@ -411,6 +459,10 @@ export function DeflectionContourCanvas({ results, field }: { results: SolverRes
         ctx.closePath();
         ctx.stroke();
       }
+      if (!elements.length && results.geometryOutline.length) {
+        ctx.strokeStyle = "rgba(255,255,255,0.28)";
+        drawGeometryOutline(ctx, projector, results.geometryOutline);
+      }
     } else {
       drawElementPolygons(
         ctx,
@@ -457,7 +509,7 @@ export function DeformedShapeCanvas({ results, field }: { results: SolverResults
     const elements = results.meshElements ?? [];
     const bounds = getBounds(results.nodes);
 
-    if (!bounds || !elements.length) {
+    if (!bounds || (!elements.length && !results.geometryOutline.length)) {
       drawEmptyState(ctx, width, height, "No deformed shape is available for this analysis.");
       return;
     }
@@ -472,57 +524,74 @@ export function DeformedShapeCanvas({ results, field }: { results: SolverResults
     const maxDisp = Math.max(...results.nodes.map((node) => node.uMagnitude), 0);
     const amplification = maxDisp > 0 ? (0.14 * bounds.maxSpan) / maxDisp : 1;
 
-    for (const element of elements) {
-      const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
-      if (elementNodes.length < 3) {
-        continue;
+    if (elements.length) {
+      for (const element of elements) {
+        const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
+        if (elementNodes.length < 3) {
+          continue;
+        }
+
+        ctx.beginPath();
+        elementNodes.forEach((node, index) => {
+          const point = projector.toCanvas(node.x, node.y);
+          if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        });
+        ctx.closePath();
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
       }
 
-      ctx.beginPath();
-      elementNodes.forEach((node, index) => {
-        const point = projector.toCanvas(node.x, node.y);
-        if (index === 0) {
-          ctx.moveTo(point.x, point.y);
-        } else {
-          ctx.lineTo(point.x, point.y);
+      for (const element of elements) {
+        const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
+        if (elementNodes.length < 3) {
+          continue;
         }
-      });
-      ctx.closePath();
-      ctx.strokeStyle = "rgba(255,255,255,0.1)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    }
 
-    for (const element of elements) {
-      const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
-      if (elementNodes.length < 3) {
-        continue;
+        const averageValue =
+          elementNodes.reduce((sum, node) => sum + (node[field] ?? 0), 0) / Math.max(elementNodes.length, 1);
+
+        ctx.beginPath();
+        elementNodes.forEach((node, index) => {
+          const point = projector.toCanvas(node.x + node.ux * amplification, node.y + node.uy * amplification);
+          if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        });
+        ctx.closePath();
+        ctx.fillStyle = colorForValue(averageValue, range);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.32)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
-
-      const averageValue =
-        elementNodes.reduce((sum, node) => sum + (node[field] ?? 0), 0) / Math.max(elementNodes.length, 1);
-
-      ctx.beginPath();
-      elementNodes.forEach((node, index) => {
-        const point = projector.toCanvas(node.x + node.ux * amplification, node.y + node.uy * amplification);
-        if (index === 0) {
-          ctx.moveTo(point.x, point.y);
-        } else {
-          ctx.lineTo(point.x, point.y);
-        }
-      });
-      ctx.closePath();
-      ctx.fillStyle = colorForValue(averageValue, range);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.32)";
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
       ctx.lineWidth = 1;
-      ctx.stroke();
+      drawGeometryOutline(ctx, projector, results.geometryOutline);
+      drawGeometryOutline(ctx, projector, results.geometryOutline, {
+        deformed: true,
+        amplification,
+        valueForPoint: (point) => {
+          if (field === "uMagnitude") {
+            return Math.hypot(point.ux, point.uy);
+          }
+          return point[field];
+        },
+        range,
+      });
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.84)";
     ctx.font = "12px system-ui, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(`Deformed mesh colored by ${getDeflectionFieldLabel(field)}`, 18, 18);
+    ctx.fillText(`${elements.length ? "Deformed mesh" : "Deformed outline"} colored by ${getDeflectionFieldLabel(field)}`, 18, 18);
     ctx.fillText(`Amplification x${formatScalar(amplification)}`, 18, 36);
     drawLegend(ctx, range, width, height, `${getDeflectionFieldLabel(field)} [mm]`);
   }, [field, results]);

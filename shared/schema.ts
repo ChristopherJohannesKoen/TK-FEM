@@ -20,6 +20,7 @@ export const analyses = pgTable("analyses", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull(),
   name: text("name").notNull(),
+  analysisMode: text("analysis_mode").notNull().default("meshed"), // meshed | functionized
   // Geometry parameters
   domainType: text("domain_type").notNull().default("rectangle"), // rectangle | circle_hole
   domainWidth: real("domain_width").notNull().default(10.0),
@@ -38,6 +39,7 @@ export const analyses = pgTable("analyses", {
   // TK-FEM specific
   magnusMode: text("magnus_mode").notNull().default("auto"), // auto | manual
   magnusTruncation: integer("magnus_truncation").notNull().default(3),
+  boundaryQuadratureOrder: integer("boundary_quadrature_order").notNull().default(8),
   // Solver status and results (JSON)
   status: text("status").notNull().default("pending"), // pending | running | complete | error
   results: jsonb("results"),

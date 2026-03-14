@@ -16,6 +16,11 @@ import type { Analysis } from "@shared/schema";
 import type { DeflectionField, SolverResults, StressField } from "@shared/solver";
 import { Clock, ExternalLink, Play, RefreshCw } from "lucide-react";
 
+function estimateBoundaryFrameCount(analysis: Analysis) {
+  const base = analysis.meshNx * 2 + analysis.meshNy * 2;
+  return analysis.domainType === "circle_hole" ? base + Math.max(4, Math.round((analysis.meshNx + analysis.meshNy) / 2)) : base;
+}
+
 function formatValue(value: number) {
   const absolute = Math.abs(value);
   if (absolute === 0) {
@@ -68,11 +73,14 @@ function SolverLog({
 }) {
   const results = (analysis.results as SolverResults | null) ?? null;
   const magnus = results?.magnusAnalysis;
-  const nodeCount = (analysis.meshNx + 1) * (analysis.meshNy + 1);
+  const nodeCount = analysis.analysisMode === "functionized" ? estimateBoundaryFrameCount(analysis) : (analysis.meshNx + 1) * (analysis.meshNy + 1);
   const lines = [
     `[ANALYSIS] ${analysis.name}`,
+    `[MODE] ${analysis.analysisMode === "functionized" ? "functionized single-domain" : "meshed TK-FEM"}`,
     `[DOMAIN] ${analysis.domainType === "circle_hole" ? "quarter plate with circular hole" : "rectangle"}; W=${analysis.domainWidth} mm, H=${analysis.domainHeight} mm, a=${analysis.holeRadius} mm`,
-    `[MESH] ${analysis.meshNx} x ${analysis.meshNy} elements, ${nodeCount} nodes, ${nodeCount * 2} DOFs`,
+    analysis.analysisMode === "functionized"
+      ? `[BOUNDARY] resolution=${analysis.meshNx} x ${analysis.meshNy}, ${nodeCount} boundary frames, ${nodeCount * 2} boundary DOFs, q=${analysis.boundaryQuadratureOrder}`
+      : `[MESH] ${analysis.meshNx} x ${analysis.meshNy} elements, ${nodeCount} nodes, ${nodeCount * 2} DOFs`,
     `[MATERIAL] E=${analysis.youngModulus.toLocaleString()} MPa, nu=${analysis.poissonRatio}, ${analysis.planeType}`,
     `[LOAD] ${analysis.loadType}, magnitude=${analysis.loadMagnitude} MPa`,
     `[MAGNUS] mode=${analysis.magnusMode}, requested m=${analysis.magnusTruncation}`,
@@ -85,6 +93,9 @@ function SolverLog({
     results
       ? `[POST] peak displacement=${formatValue(results.maxDisp)} mm, peak von Mises=${formatValue(results.maxVonMises)} MPa`
       : "[POST] waiting for solver output",
+    results?.analysisMode === "functionized" && results.functionizedDiagnostics
+      ? `[POST] boundary residual max=${formatValue(results.functionizedDiagnostics.maxBoundaryResidual)}, rms=${formatValue(results.functionizedDiagnostics.rmsBoundaryResidual)}`
+      : "[POST] boundary residual diagnostics are not active for meshed runs",
     typeof results?.kirschSCF === "number"
       ? `[POST] Kirsch SCF=${results.kirschSCF.toFixed(4)}, error=${results.kirschError?.toFixed(2) ?? "n/a"}%`
       : "[POST] Kirsch benchmark not available for this case",
@@ -212,7 +223,9 @@ export default function Solver() {
         <div>
           <h1 className="text-xl font-bold">{analysis.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {analysis.meshNx} x {analysis.meshNy} mesh, {analysis.planeType}, {analysis.magnusMode} Magnus mode, requested m = {analysis.magnusTruncation}
+            {analysis.analysisMode === "functionized"
+              ? `single-domain functionized solve, boundary resolution ${analysis.meshNx} x ${analysis.meshNy}, q = ${analysis.boundaryQuadratureOrder}, ${analysis.planeType}`
+              : `${analysis.meshNx} x ${analysis.meshNy} mesh, ${analysis.planeType}, ${analysis.magnusMode} Magnus mode, requested m = ${analysis.magnusTruncation}`}
           </p>
         </div>
 
@@ -257,7 +270,9 @@ export default function Solver() {
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm text-amber-300">
             <RefreshCw size={14} className="animate-spin" />
-            Running Magnus analysis, stiffness assembly, and solve stages.
+            {analysis.analysisMode === "functionized"
+              ? "Running Magnus analysis, exact-boundary collocation, and single-domain solve stages."
+              : "Running Magnus analysis, stiffness assembly, and solve stages."}
           </div>
           <Progress value={65} className="h-1.5" />
         </div>
@@ -333,7 +348,11 @@ export default function Solver() {
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <StressContourCanvas results={results} field={stressField} />
-                    <p className="text-xs text-muted-foreground">Open the Results page for full post-processing, convergence plots, and exports.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {results.analysisMode === "functionized"
+                        ? "Open the Results page for full boundary diagnostics, convergence plots, and exact-geometry post-processing."
+                        : "Open the Results page for full post-processing, convergence plots, and exports."}
+                    </p>
                   </CardContent>
                 </Card>
 
@@ -367,6 +386,13 @@ export default function Solver() {
         <TabsContent value="params" className="mt-4">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <ParameterCard
+              title="Mode"
+              items={[
+                ["Analysis mode", analysis.analysisMode],
+                ["Boundary quadrature", `${analysis.boundaryQuadratureOrder}`],
+              ]}
+            />
+            <ParameterCard
               title="Domain"
               items={[
                 ["Type", analysis.domainType],
@@ -377,12 +403,12 @@ export default function Solver() {
               ]}
             />
             <ParameterCard
-              title="Mesh"
+              title={analysis.analysisMode === "functionized" ? "Resolution" : "Mesh"}
               items={[
                 ["Nx x Ny", `${analysis.meshNx} x ${analysis.meshNy}`],
-                ["Elements", `${analysis.meshNx * analysis.meshNy}`],
-                ["Nodes", `${(analysis.meshNx + 1) * (analysis.meshNy + 1)}`],
-                ["DOFs", `${(analysis.meshNx + 1) * (analysis.meshNy + 1) * 2}`],
+                [analysis.analysisMode === "functionized" ? "Comp. elements" : "Elements", `${analysis.analysisMode === "functionized" ? 1 : analysis.meshNx * analysis.meshNy}`],
+                [analysis.analysisMode === "functionized" ? "Boundary frames" : "Nodes", `${analysis.analysisMode === "functionized" ? estimateBoundaryFrameCount(analysis) : (analysis.meshNx + 1) * (analysis.meshNy + 1)}`],
+                [analysis.analysisMode === "functionized" ? "Boundary DOFs" : "DOFs", `${analysis.analysisMode === "functionized" ? estimateBoundaryFrameCount(analysis) * 2 : (analysis.meshNx + 1) * (analysis.meshNy + 1) * 2}`],
               ]}
             />
             <ParameterCard

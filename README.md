@@ -1,6 +1,9 @@
 # TK-FEM
 
-TK-FEM is a Vite + React + TypeScript frontend with an Express + TypeScript backend for exploring Trefftz-Koen finite element ideas and visualizing solver output.
+TK-FEM is a Vite + React + TypeScript frontend with an Express + TypeScript backend for exploring Trefftz-Koen finite element ideas and visualizing solver output across two solver modes:
+
+- `meshed`: transport-based TK-FEM on a structured or body-fitted element mesh
+- `functionized`: a single-domain boundary-first workflow with no interior element subdivision
 
 ## Quick Start
 
@@ -21,6 +24,18 @@ npm.cmd run dev
 Open `http://localhost:5000`.
 
 If Python or `sympy` is not available, the backend falls back to a numeric Magnus screening path. The application still runs, but the Lie-algebra closure check is less rigorous than the SymPy path.
+
+## Analysis Modes
+
+- `Meshed TK-FEM` keeps the existing structured/body-fitted element workflow and transport-based boundary assembly.
+- `Functionized Single-Domain TK-FEM` removes interior element subdivision and treats the entire geometry as one computational domain.
+
+Current functionized coverage:
+
+- `rectangle` with smooth boundary loading uses the boundary-collocation single-domain solver
+- `circle_hole` with `uniform_tension` uses the exact Kirsch one-domain benchmark path
+
+Unsupported combinations are blocked in the UI or rejected by the backend so the application does not silently run a mathematically weak fallback.
 
 ## Common Commands
 

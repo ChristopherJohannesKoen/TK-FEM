@@ -177,7 +177,9 @@ export default function Dashboard() {
                   <div>
                     <div className="text-sm font-medium">{a.name}</div>
                     <div className="text-xs text-muted-foreground font-mono">
-                      {a.meshNx}×{a.meshNy} mesh · E={a.youngModulus.toLocaleString()} · ν={a.poissonRatio} · m={a.magnusTruncation}
+                      {a.analysisMode === "functionized"
+                        ? `${a.meshNx}x${a.meshNy} boundary · q=${a.boundaryQuadratureOrder} · E=${a.youngModulus.toLocaleString()} · nu=${a.poissonRatio}`
+                        : `${a.meshNx}x${a.meshNy} mesh · E=${a.youngModulus.toLocaleString()} · nu=${a.poissonRatio} · m=${a.magnusTruncation}`}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
