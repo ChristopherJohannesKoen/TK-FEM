@@ -33,7 +33,7 @@ If Python or `sympy` is not available, the backend falls back to a numeric Magnu
 Current functionized coverage:
 
 - `rectangle` with smooth boundary loading uses the boundary-collocation single-domain solver
-- `circle_hole` with `uniform_tension` uses the exact Kirsch one-domain benchmark path
+- `circle_hole` with `uniform_tension` uses the functionized single-domain boundary solver and reports against the exact Kirsch benchmark for validation
 
 Unsupported combinations are blocked in the UI or rejected by the backend so the application does not silently run a mathematically weak fallback.
 

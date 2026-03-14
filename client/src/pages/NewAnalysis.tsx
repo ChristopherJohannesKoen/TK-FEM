@@ -556,7 +556,7 @@ export default function NewAnalysis() {
                     {watchValues.analysisMode === "functionized" ? (
                       <p className="mt-2 text-xs text-muted-foreground">
                         {watchValues.domainType === "circle_hole"
-                          ? "Functionized circle-hole mode uses the exact Kirsch single-domain benchmark under uniform tension."
+                          ? "Functionized circle-hole mode uses the single-domain boundary solver and is currently validated against the Kirsch uniform-tension benchmark."
                           : "Functionized mode is restricted to smooth boundary tractions."}
                       </p>
                     ) : null}

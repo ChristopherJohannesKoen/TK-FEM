@@ -82,9 +82,20 @@ interface FunctionizedSolveResult {
   stressConcentrationFactor: number;
 }
 
-interface ComplexNumber {
-  re: number;
-  im: number;
+interface FunctionizedCoreResult {
+  nodes: SolverNodeResult[];
+  stresses: SolverStressResult[];
+  meshElements: SolverResults["meshElements"];
+  fieldSamples: SolverFieldSample[];
+  holeBoundarySamples: SolverBoundarySample[];
+  boundaryFrames: SolverBoundaryFrameResult[];
+  geometryOutline: SolverGeometryPoint[];
+  functionizedDiagnostics: FunctionizedDiagnostics;
+  maxDisp: number;
+  maxVonMises: number;
+  kirschSCF?: number;
+  kirschError?: number;
+  stressError: number;
 }
 
 interface BoundaryConstraint {
@@ -641,49 +652,6 @@ function toPolarStress(stress: { sxx: number; syy: number; sxy: number }, x: num
   };
 }
 
-function complex(re: number, im = 0): ComplexNumber {
-  return { re, im };
-}
-
-function complexAdd(left: ComplexNumber, right: ComplexNumber): ComplexNumber {
-  return { re: left.re + right.re, im: left.im + right.im };
-}
-
-function complexSub(left: ComplexNumber, right: ComplexNumber): ComplexNumber {
-  return { re: left.re - right.re, im: left.im - right.im };
-}
-
-function complexMul(left: ComplexNumber, right: ComplexNumber): ComplexNumber {
-  return {
-    re: left.re * right.re - left.im * right.im,
-    im: left.re * right.im + left.im * right.re,
-  };
-}
-
-function complexScale(value: ComplexNumber, factor: number): ComplexNumber {
-  return { re: value.re * factor, im: value.im * factor };
-}
-
-function complexConjugate(value: ComplexNumber): ComplexNumber {
-  return { re: value.re, im: -value.im };
-}
-
-function complexDivide(left: ComplexNumber, right: ComplexNumber): ComplexNumber {
-  const denominator = Math.max((right.re * right.re) + (right.im * right.im), 1e-12);
-  return {
-    re: (left.re * right.re + left.im * right.im) / denominator,
-    im: (left.im * right.re - left.re * right.im) / denominator,
-  };
-}
-
-function complexPow(value: ComplexNumber, power: number): ComplexNumber {
-  let result = complex(1, 0);
-  for (let index = 0; index < power; index++) {
-    result = complexMul(result, value);
-  }
-  return result;
-}
-
 export function kirschStress(x: number, y: number, a: number, sigmaInfinity: number) {
   const r = Math.hypot(x, y);
   if (r < a) {
@@ -707,80 +675,6 @@ export function kirschStress(x: number, y: number, a: number, sigmaInfinity: num
     syy: srr * s * s + 2 * srt * s * c + stt * c * c,
     sxy: (srr - stt) * s * c + srt * (c * c - s * s),
   };
-}
-
-function kirschComplexFieldAtPoint(
-  x: number,
-  y: number,
-  params: Pick<SolverParams, "holeRadius" | "loadMag" | "E" | "nu" | "planeType">,
-) {
-  const radius = Math.hypot(x, y);
-  if (radius < params.holeRadius) {
-    return {
-      ux: 0,
-      uy: 0,
-      uMagnitude: 0,
-      sxx: 0,
-      syy: 0,
-      sxy: 0,
-      vonMises: 0,
-    } satisfies FieldState;
-  }
-
-  const mu = params.E / (2 * (1 + params.nu));
-  const kappa = params.planeType === "plane_stress" ? (3 - params.nu) / (1 + params.nu) : 3 - 4 * params.nu;
-  const z = complex(x, y);
-  const inverseZ = complexDivide(complex(1, 0), z);
-  const inverseZ2 = complexPow(inverseZ, 2);
-  const inverseZ3 = complexPow(inverseZ, 3);
-  const inverseZ4 = complexPow(inverseZ, 4);
-  const a2 = params.holeRadius * params.holeRadius;
-  const a4 = a2 * a2;
-  const sigma = params.loadMag;
-
-  const phi = complexScale(complexAdd(z, complexScale(inverseZ, 2 * a2)), sigma / 4);
-  const dPhi = complexScale(complexSub(complex(1, 0), complexScale(inverseZ2, 2 * a2)), sigma / 4);
-  const ddPhi = complexScale(inverseZ3, sigma * a2);
-  const psi = complexScale(
-    complexSub(complexAdd(z, complexScale(inverseZ, a2)), complexScale(inverseZ3, a4)),
-    -sigma / 2,
-  );
-  const dPsi = complexScale(
-    complexAdd(
-      complexSub(complex(1, 0), complexScale(inverseZ2, a2)),
-      complexScale(inverseZ4, 3 * a4),
-    ),
-    -sigma / 2,
-  );
-
-  const displacementComplex = complexScale(
-    complexSub(
-      complexSub(
-        complexScale(phi, kappa),
-        complexMul(z, complexConjugate(dPhi)),
-      ),
-      complexConjugate(psi),
-    ),
-    1 / (2 * mu),
-  );
-
-  const sumStress = 4 * dPhi.re;
-  const diffComplex = complexScale(complexAdd(complexMul(complexConjugate(z), ddPhi), dPsi), 2);
-  const syyMinusSxx = diffComplex.re;
-  const twoSxy = diffComplex.im;
-  const sxx = 0.5 * (sumStress - syyMinusSxx);
-  const syy = 0.5 * (sumStress + syyMinusSxx);
-  const sxy = 0.5 * twoSxy;
-
-  return {
-    ux: displacementComplex.re,
-    uy: displacementComplex.im,
-    uMagnitude: Math.hypot(displacementComplex.re, displacementComplex.im),
-    sxx,
-    syy,
-    sxy,
-    vonMises: Math.sqrt(sxx * sxx - sxx * syy + syy * syy + 3 * sxy * sxy),
-  } satisfies FieldState;
 }
 
 function isInsideDomain(params: Pick<SolverParams, "domainType" | "W" | "H" | "holeRadius">, x: number, y: number) {
@@ -956,179 +850,6 @@ function functionizedLevels(nx: number, ny: number) {
   return Array.from(unique.values()).sort((left, right) => left.nx + left.ny - (right.nx + right.ny));
 }
 
-function solveExactKirschBenchmark(
-  params: Pick<
-    SolverParams,
-    | "domainType"
-    | "W"
-    | "H"
-    | "holeRadius"
-    | "nx"
-    | "ny"
-    | "E"
-    | "nu"
-    | "planeType"
-    | "loadType"
-    | "loadMag"
-    | "boundaryQuadratureOrder"
-  >,
-): FunctionizedSolveResult {
-  const segments = buildSegments(params);
-  const counts = boundaryFrameCounts(params);
-  const { frames, totalLength } = sampleBoundaryFrames(segments, counts);
-  const enforcementPoints = sampleBoundaryQuadrature(segments, counts, params.boundaryQuadratureOrder, totalLength);
-
-  const boundaryFrames = frames.map((frame, index) => {
-    const field = kirschComplexFieldAtPoint(frame.x, frame.y, params);
-    const tractionX = field.sxx * frame.normal[0] + field.sxy * frame.normal[1];
-    const tractionY = field.sxy * frame.normal[0] + field.syy * frame.normal[1];
-    return {
-      id: index,
-      x: frame.x,
-      y: frame.y,
-      ux: field.ux,
-      uy: field.uy,
-      uMagnitude: field.uMagnitude,
-      tractionX,
-      tractionY,
-      tractionNormal: tractionX * frame.normal[0] + tractionY * frame.normal[1],
-      tractionTangential: tractionX * frame.tangent[0] + tractionY * frame.tangent[1],
-      boundaryType: frame.boundaryType,
-      curveLabel: frame.curveLabel,
-      arcLength: frame.arcLength,
-      normalizedArcLength: frame.normalizedArcLength,
-    } satisfies SolverBoundaryFrameResult;
-  });
-
-  const nodes = boundaryFrames.map((frame) => ({
-    id: frame.id,
-    x: frame.x,
-    y: frame.y,
-    ux: frame.ux,
-    uy: frame.uy,
-    uMagnitude: frame.uMagnitude,
-  } satisfies SolverNodeResult));
-
-  const fieldSamples = buildFieldSamples(
-    params,
-    [],
-    [],
-    constitutiveMatrix(params.E, params.nu, params.planeType),
-  ).map((sample) => {
-    const field = kirschComplexFieldAtPoint(sample.x, sample.y, params);
-    return { x: sample.x, y: sample.y, ...field };
-  });
-
-  const stresses = fieldSamples.map((sample, index) => ({
-    elementId: index,
-    cx: sample.x,
-    cy: sample.y,
-    sxx: sample.sxx,
-    syy: sample.syy,
-    sxy: sample.sxy,
-    vonMises: sample.vonMises,
-  } satisfies SolverStressResult));
-
-  const geometryOutline = segments.flatMap((segment, index) => {
-    const sampleCount = Math.max(16, (counts[index] ?? 1) * 4);
-    return Array.from({ length: sampleCount + 1 }, (_, sampleIndex) => {
-      const t = sampleIndex / Math.max(sampleCount, 1);
-      const point = segment.pointAt(t);
-      const field = kirschComplexFieldAtPoint(point.x, point.y, params);
-      const arcLength = segment.length * t + segments.slice(0, index).reduce((sum, entry) => sum + entry.length, 0);
-      return {
-        x: point.x,
-        y: point.y,
-        ux: field.ux,
-        uy: field.uy,
-        boundaryType: segment.boundaryType,
-        curveLabel: segment.curveLabel,
-        arcLength,
-        normalizedArcLength: arcLength / Math.max(totalLength, 1e-12),
-      } satisfies SolverGeometryPoint;
-    });
-  });
-
-  const holeBoundarySamples = buildHoleBoundarySamples(
-    params,
-    [],
-    [],
-    constitutiveMatrix(params.E, params.nu, params.planeType),
-    Math.max(36, params.boundaryQuadratureOrder * 6),
-  ).map((sample) => {
-    const field = kirschComplexFieldAtPoint(sample.x, sample.y, params);
-    const polar = toPolarStress(field, sample.x, sample.y);
-    const theta = Math.atan2(sample.y, sample.x);
-    const normal: Vec2 = [-Math.cos(theta), -Math.sin(theta)];
-    const tangent: Vec2 = [Math.sin(theta), -Math.cos(theta)];
-    const tractionX = field.sxx * normal[0] + field.sxy * normal[1];
-    const tractionY = field.sxy * normal[0] + field.syy * normal[1];
-    return {
-      x: sample.x,
-      y: sample.y,
-      thetaDeg: polar.thetaDeg,
-      sigmaRR: polar.sigmaRR,
-      sigmaThetaTheta: polar.sigmaThetaTheta,
-      sigmaRTheta: polar.sigmaRTheta,
-      tractionNormal: tractionX * normal[0] + tractionY * normal[1],
-      tractionTangential: tractionX * tangent[0] + tractionY * tangent[1],
-    } satisfies SolverBoundarySample;
-  });
-
-  const residuals = enforcementPoints.flatMap((point) => {
-    const field = kirschComplexFieldAtPoint(point.x, point.y, params);
-    const tractionX = field.sxx * point.normal[0] + field.sxy * point.normal[1];
-    const tractionY = field.sxy * point.normal[0] + field.syy * point.normal[1];
-    return boundaryConstraints(point.boundaryType, params).map((constraint) => {
-      const value =
-        constraint.kind === "displacement"
-          ? constraint.component === 0
-            ? field.ux
-            : field.uy
-          : constraint.component === 0
-            ? tractionX
-            : tractionY;
-      return value - constraint.value;
-    });
-  });
-
-  const maxBoundaryResidual = residuals.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
-  const rmsBoundaryResidual = Math.sqrt(residuals.reduce((sum, value) => sum + value * value, 0) / Math.max(residuals.length, 1));
-  const convergenceData = functionizedLevels(params.nx, params.ny).map((level) => ({
-    method: "Functionized TK-FEM",
-    nElem: boundaryFrameCounts({ domainType: params.domainType, nx: level.nx, ny: level.ny }).reduce((sum, count) => sum + count, 0),
-    scf: 3,
-    error: 0,
-  }));
-
-  return {
-    nodes,
-    stresses,
-    meshElements: [],
-    fieldSamples,
-    holeBoundarySamples,
-    boundaryFrames,
-    geometryOutline,
-    functionizedDiagnostics: {
-      boundaryFrameCount: boundaryFrames.length,
-      sourcePointCount: 0,
-      boundaryQuadratureOrder: params.boundaryQuadratureOrder,
-      sourceOffset: 0,
-      maxBoundaryResidual,
-      rmsBoundaryResidual,
-    },
-    maxDisp: Math.max(...nodes.map((node) => node.uMagnitude), ...fieldSamples.map((sample) => sample.uMagnitude), 0),
-    maxVonMises: Math.max(...fieldSamples.map((sample) => sample.vonMises), 0),
-    kirschSCF: 3,
-    kirschError: 0,
-    nElements: 1,
-    nNodes: nodes.length,
-    nDOF: nodes.length * 2,
-    convergenceData,
-    stressConcentrationFactor: 3,
-  };
-}
-
 function solveFunctionizedCore(
   params: Pick<
     SolverParams,
@@ -1145,7 +866,7 @@ function solveFunctionizedCore(
     | "loadMag"
     | "boundaryQuadratureOrder"
   >,
-) {
+): FunctionizedCoreResult {
   const segments = buildSegments(params);
   const counts = boundaryFrameCounts(params);
   const { frames, totalLength } = sampleBoundaryFrames(segments, counts);
@@ -1216,6 +937,52 @@ function solveFunctionizedCore(
   };
 }
 
+function buildFunctionizedConvergenceData(
+  params: Pick<
+    SolverParams,
+    | "domainType"
+    | "W"
+    | "H"
+    | "holeRadius"
+    | "nx"
+    | "ny"
+    | "E"
+    | "nu"
+    | "planeType"
+    | "loadType"
+    | "loadMag"
+    | "boundaryQuadratureOrder"
+  >,
+  current: FunctionizedCoreResult,
+) {
+  if (params.domainType !== "circle_hole" || params.loadType !== "uniform_tension" || params.loadMag <= 0) {
+    return [] satisfies SolverConvergencePoint[];
+  }
+
+  const studies = new Map<string, FunctionizedCoreResult>();
+  studies.set(`${params.nx}:${params.ny}`, current);
+
+  return functionizedLevels(params.nx, params.ny).map((level) => {
+    const key = `${level.nx}:${level.ny}`;
+    let study = studies.get(key);
+    if (!study) {
+      study = solveFunctionizedCore({
+        ...params,
+        nx: level.nx,
+        ny: level.ny,
+      });
+      studies.set(key, study);
+    }
+
+    return {
+      method: "Functionized TK-FEM",
+      nElem: study.functionizedDiagnostics.boundaryFrameCount,
+      scf: Number((study.kirschSCF ?? 0).toFixed(4)),
+      error: Number(study.stressError.toFixed(4)),
+    } satisfies SolverConvergencePoint;
+  });
+}
+
 export function runFunctionizedSingleDomainSolve(
   params: Pick<
     SolverParams,
@@ -1237,16 +1004,12 @@ export function runFunctionizedSingleDomainSolve(
     throw new Error("Functionized single-domain mode currently supports smooth boundary tractions only. Use meshed mode for point loads.");
   }
 
-  if (params.domainType === "circle_hole" && params.loadType === "uniform_tension") {
-    return solveExactKirschBenchmark(params);
-  }
-
-  if (params.domainType === "circle_hole") {
-    throw new Error("Functionized circle-hole mode currently supports the uniform-tension Kirsch benchmark only.");
+  if (params.domainType === "circle_hole" && params.loadType !== "uniform_tension") {
+    throw new Error("Functionized circle-hole mode is currently validated for the uniform-tension Kirsch benchmark only.");
   }
 
   const current = solveFunctionizedCore(params);
-  const convergenceData: SolverConvergencePoint[] = [];
+  const convergenceData = buildFunctionizedConvergenceData(params, current);
 
   return {
     nodes: current.nodes,

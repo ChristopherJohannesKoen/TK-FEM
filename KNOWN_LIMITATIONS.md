@@ -11,7 +11,7 @@ Current gaps:
 - the frontend and backend currently implement the `TK-Q4-edge` style workflow; higher-order edge enrichments such as the `TK-Q8-edge` variant are not yet present
 - the convergence study is generated from actual in-app benchmark solves, but it is still limited to the built-in structured mesh family rather than an external Gmsh/photoelastic validation pipeline
 - the functionized single-domain mode is currently implemented for the built-in analytic geometries only; there is no general CAD/NURBS import and no arbitrary geometry functionation pipeline yet
-- the exact functionized circle-hole path is currently scoped to the Kirsch uniform-tension benchmark; other circular-hole load cases should still use the meshed solver path
+- the functionized circle-hole mode now runs through the single-domain boundary solver for the Kirsch uniform-tension benchmark, but its conditioning and SCF accuracy are still resolution-sensitive; other circular-hole load cases should still use the meshed solver path
 
 ## Magnus Analysis
 
