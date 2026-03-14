@@ -265,15 +265,46 @@ function computeStress(constitutive: ConstitutiveData, state: number[]) {
   };
 }
 
+function transportElasticParameters(E: number, nu: number, planeType: "plane_stress" | "plane_strain") {
+  const mu = E / (2 * (1 + nu));
+
+  if (planeType === "plane_stress") {
+    return {
+      lambda2D: E * nu / (1 - nu * nu),
+      mu,
+    };
+  }
+
+  return {
+    lambda2D: E * nu / ((1 + nu) * (1 - 2 * nu)),
+    mu,
+  };
+}
+
 function buildTransportOperators(E: number, nu: number, planeType: "plane_stress" | "plane_strain"): TransportOperators {
   const n = 6;
   const Ax = matZero(n);
   const Ay = matZero(n);
+  const { lambda2D, mu } = transportElasticParameters(E, nu, planeType);
+  const lambdaPlus2Mu = lambda2D + 2 * mu;
+  const lambdaPlusMu = lambda2D + mu;
 
   matSet(Ax, n, 0, 2, 1);
   matSet(Ax, n, 1, 3, 1);
   matSet(Ay, n, 0, 4, 1);
   matSet(Ay, n, 1, 5, 1);
+
+  // Appendix A transport lift for the homogeneous isotropic 2D benchmark family.
+  // State ordering: [ux, uy, dux/dx, duy/dx, dux/dy, duy/dy].
+  matSet(Ax, n, 2, 4, -mu / lambdaPlus2Mu);
+  matSet(Ax, n, 2, 5, -lambdaPlusMu / lambdaPlus2Mu);
+  matSet(Ax, n, 3, 4, -lambdaPlusMu / mu);
+  matSet(Ax, n, 3, 5, -lambdaPlus2Mu / mu);
+
+  matSet(Ay, n, 4, 2, -mu / lambdaPlus2Mu);
+  matSet(Ay, n, 4, 3, -lambdaPlusMu / lambdaPlus2Mu);
+  matSet(Ay, n, 5, 2, -lambdaPlusMu / mu);
+  matSet(Ay, n, 5, 3, -lambdaPlus2Mu / mu);
 
   return { Ax, Ay, n };
 }

@@ -191,11 +191,21 @@ export default function Theory() {
             <MathBlock>w(x,y) = [u_x, u_y, ∂_x u_x, ∂_x u_y, ∂_y u_x, ∂_y u_y]ᵀ ∈ ℝ⁶</MathBlock>
             <p><strong className="text-foreground">Transport system:</strong></p>
             <MathBlock>∂w/∂x = A_x w,   ∂w/∂y = A_y w</MathBlock>
-            <p>where A_x, A_y ∈ ℝ^(6×6) encode the constitutive law and equilibrium equations:</p>
-            <MathBlock>{`A_x = [[0  I  0],    A_y = [[0  0  I],
-        [M_x 0  0],          [0  0  I],
-        [0   0  I]]          [M_y 0  0]]`}</MathBlock>
-            <p>M_x, M_y encode the elastic moduli E and ν. For isotropic homogeneous plane stress, these are constant matrices — enabling Koenian closure.</p>
+            <p>where A_x, A_y encode the constitutive law and equilibrium equations through the 2D elastic Lamé parameters:</p>
+            <MathBlock>λ_2D = Eν/(1-ν²)  [plane stress],   λ_2D = Eν/((1+ν)(1-2ν))  [plane strain],   μ = E/(2(1+ν))</MathBlock>
+            <MathBlock>{`A_x = [[0,0,1,0,0,0],
+        [0,0,0,1,0,0],
+        [0,0,0,0,-μ/(λ_2D+2μ),-(λ_2D+μ)/(λ_2D+2μ)],
+        [0,0,0,0,-(λ_2D+μ)/μ,-(λ_2D+2μ)/μ],
+        [0,0,0,0,0,0],
+        [0,0,0,0,0,0]]`}</MathBlock>
+            <MathBlock>{`A_y = [[0,0,0,0,1,0],
+        [0,0,0,0,0,1],
+        [0,0,0,0,0,0],
+        [0,0,0,0,0,0],
+        [0,0,-μ/(λ_2D+2μ),-(λ_2D+μ)/(λ_2D+2μ),0,0],
+        [0,0,-(λ_2D+μ)/μ,-(λ_2D+2μ)/μ,0,0]]`}</MathBlock>
+            <p>For homogeneous isotropic elasticity these matrices are constant, so the benchmark transport remains flat and the straight-path Magnus generator reduces to the exponential of a constant operator.</p>
           </Section>
 
           <Section title="Path-Parameterized Transport" sub="Along smooth paths γ(s) within an element">

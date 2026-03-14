@@ -6,7 +6,7 @@ The current solver now uses a transport-based, boundary-only TK assembly for the
 
 Current gaps:
 
-- the implemented transport operator is the affine exact-closure case for homogeneous linear elasticity; the broader Appendix A operator family and Koenian geometry-connection treatment are not yet implemented
+- the homogeneous isotropic Appendix A transport operators are now implemented for the benchmark solver family, but the broader Koenian geometry-connection treatment for curved, heterogeneous, or anisotropic media is still outside the current solver scope
 - the meshed path still approximates the circular hole with body-fitted polygonal edges; exact curved functionation is currently available only in the functionized single-domain benchmark path
 - the frontend and backend currently implement the `TK-Q4-edge` style workflow; higher-order edge enrichments such as the `TK-Q8-edge` variant are not yet present
 - the convergence study is generated from actual in-app benchmark solves, but it is still limited to the built-in structured mesh family rather than an external Gmsh/photoelastic validation pipeline
@@ -16,7 +16,7 @@ Current gaps:
 ## Magnus Analysis
 
 - the SymPy-backed Lie-algebra closure path still requires Python plus `sympy`; without that environment the backend falls back to numeric screening
-- for the currently implemented straight-path homogeneous benchmark case, Magnus closure is the exact first-order case; nontrivial adaptive truncation for curved, heterogeneous, or rotated-anisotropy cases remains future work
+- with the constitutive-coupled Appendix A transport operators in place, finite Magnus closure is no longer assumed a priori; the current implementation relies on symbolic or numeric closure detection and falls back to truncation when the assembled operator pair is not nilpotent
 
 ## Scope
 
