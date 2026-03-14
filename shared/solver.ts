@@ -26,6 +26,29 @@ export interface SolverMeshElement {
   nodeIds: number[];
 }
 
+export interface SolverFieldSample {
+  x: number;
+  y: number;
+  ux: number;
+  uy: number;
+  uMagnitude: number;
+  sxx: number;
+  syy: number;
+  sxy: number;
+  vonMises: number;
+}
+
+export interface SolverBoundarySample {
+  x: number;
+  y: number;
+  thetaDeg: number;
+  sigmaRR: number;
+  sigmaThetaTheta: number;
+  sigmaRTheta: number;
+  tractionNormal: number;
+  tractionTangential: number;
+}
+
 export interface SolverConvergencePoint {
   method: string;
   nElem: number;
@@ -77,6 +100,8 @@ export interface SolverResults {
   nodes: SolverNodeResult[];
   stresses: SolverStressResult[];
   meshElements: SolverMeshElement[];
+  fieldSamples: SolverFieldSample[];
+  holeBoundarySamples: SolverBoundarySample[];
   maxDisp: number;
   maxVonMises: number;
   kirschSCF?: number;

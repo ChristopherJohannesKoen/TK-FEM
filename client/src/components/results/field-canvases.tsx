@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type {
   DeflectionField,
+  SolverFieldSample,
   SolverMeshElement,
   SolverNodeResult,
   SolverResults,
@@ -172,7 +173,8 @@ function drawEmptyState(ctx: CanvasRenderingContext2D, width: number, height: nu
 }
 
 function getStressRange(results: SolverResults, field: StressField): ScalarRange {
-  const values = results.stresses.map((stress) => stress[field]).filter(Number.isFinite);
+  const source = results.fieldSamples.length ? results.fieldSamples : results.stresses;
+  const values = source.map((sample) => sample[field]).filter(Number.isFinite);
   if (!values.length) {
     return { min: 0, max: 1 };
   }
@@ -186,7 +188,8 @@ function getStressRange(results: SolverResults, field: StressField): ScalarRange
 }
 
 function getDeflectionRange(results: SolverResults, field: DeflectionField): ScalarRange {
-  const values = results.nodes.map((node) => node[field]).filter(Number.isFinite);
+  const source = results.fieldSamples.length ? results.fieldSamples : results.nodes;
+  const values = source.map((sample) => sample[field]).filter(Number.isFinite);
   if (!values.length) {
     return { min: 0, max: 1 };
   }
@@ -228,6 +231,31 @@ function drawElementPolygons(
     ctx.strokeStyle = "rgba(255,255,255,0.14)";
     ctx.lineWidth = 0.8;
     ctx.stroke();
+  }
+}
+
+function drawSampleField(
+  ctx: CanvasRenderingContext2D,
+  projector: ReturnType<typeof createProjector>,
+  samples: SolverFieldSample[],
+  getValue: (sample: SolverFieldSample) => number,
+  range: ScalarRange,
+) {
+  if (!samples.length) {
+    return;
+  }
+
+  const xs = Array.from(new Set(samples.map((sample) => Number(sample.x.toFixed(6))))).sort((a, b) => a - b);
+  const ys = Array.from(new Set(samples.map((sample) => Number(sample.y.toFixed(6))))).sort((a, b) => a - b);
+  const dx = xs.length > 1 ? Math.min(...xs.slice(1).map((x, index) => x - xs[index])) : 0;
+  const dy = ys.length > 1 ? Math.min(...ys.slice(1).map((y, index) => y - ys[index])) : 0;
+  const halfWidth = Math.max(projector.scale * (dx || 0.15) * 0.48, 3);
+  const halfHeight = Math.max(projector.scale * (dy || 0.15) * 0.48, 3);
+
+  for (const sample of samples) {
+    const point = projector.toCanvas(sample.x, sample.y);
+    ctx.fillStyle = colorForValue(getValue(sample), range);
+    ctx.fillRect(point.x - halfWidth, point.y - halfHeight, halfWidth * 2, halfHeight * 2);
   }
 }
 
@@ -274,7 +302,7 @@ export function StressContourCanvas({ results, field }: { results: SolverResults
     const elements = results.meshElements ?? [];
     const bounds = getBounds(results.nodes);
 
-    if (!bounds || !elements.length) {
+    if (!bounds || (!elements.length && !results.fieldSamples.length)) {
       drawEmptyState(ctx, width, height, "No stress field is available for this analysis.");
       return;
     }
@@ -288,14 +316,37 @@ export function StressContourCanvas({ results, field }: { results: SolverResults
     const stressMap = new Map(results.stresses.map((stress) => [stress.elementId, stress]));
     const range = getStressRange(results, field);
 
-    drawElementPolygons(
-      ctx,
-      projector,
-      elements,
-      nodeMap,
-      (element) => stressMap.get(element.id)?.[field] ?? 0,
-      range,
-    );
+    if (results.fieldSamples.length) {
+      drawSampleField(ctx, projector, results.fieldSamples, (sample) => sample[field], range);
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 0.8;
+      for (const element of elements) {
+        const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
+        if (elementNodes.length < 3) {
+          continue;
+        }
+        ctx.beginPath();
+        elementNodes.forEach((node, index) => {
+          const point = projector.toCanvas(node.x, node.y);
+          if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        });
+        ctx.closePath();
+        ctx.stroke();
+      }
+    } else {
+      drawElementPolygons(
+        ctx,
+        projector,
+        elements,
+        nodeMap,
+        (element) => stressMap.get(element.id)?.[field] ?? 0,
+        range,
+      );
+    }
 
     ctx.fillStyle = "rgba(255,255,255,0.84)";
     ctx.font = "12px system-ui, sans-serif";
@@ -326,7 +377,7 @@ export function DeflectionContourCanvas({ results, field }: { results: SolverRes
     const elements = results.meshElements ?? [];
     const bounds = getBounds(results.nodes);
 
-    if (!bounds || !elements.length) {
+    if (!bounds || (!elements.length && !results.fieldSamples.length)) {
       drawEmptyState(ctx, width, height, "No nodal deflection field is available for this analysis.");
       return;
     }
@@ -339,20 +390,43 @@ export function DeflectionContourCanvas({ results, field }: { results: SolverRes
     const nodeMap = new Map(results.nodes.map((node) => [node.id, node]));
     const range = getDeflectionRange(results, field);
 
-    drawElementPolygons(
-      ctx,
-      projector,
-      elements,
-      nodeMap,
-      (element) => {
-        const values = element.nodeIds
-          .map((nodeId) => nodeMap.get(nodeId)?.[field] ?? 0)
-          .filter(Number.isFinite);
+    if (results.fieldSamples.length) {
+      drawSampleField(ctx, projector, results.fieldSamples, (sample) => sample[field], range);
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 0.8;
+      for (const element of elements) {
+        const elementNodes = element.nodeIds.map((nodeId) => nodeMap.get(nodeId)).filter(Boolean) as SolverNodeResult[];
+        if (elementNodes.length < 3) {
+          continue;
+        }
+        ctx.beginPath();
+        elementNodes.forEach((node, index) => {
+          const point = projector.toCanvas(node.x, node.y);
+          if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        });
+        ctx.closePath();
+        ctx.stroke();
+      }
+    } else {
+      drawElementPolygons(
+        ctx,
+        projector,
+        elements,
+        nodeMap,
+        (element) => {
+          const values = element.nodeIds
+            .map((nodeId) => nodeMap.get(nodeId)?.[field] ?? 0)
+            .filter(Number.isFinite);
 
-        return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-      },
-      range,
-    );
+          return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+        },
+        range,
+      );
+    }
 
     ctx.fillStyle = "rgba(255,255,255,0.84)";
     ctx.font = "12px system-ui, sans-serif";

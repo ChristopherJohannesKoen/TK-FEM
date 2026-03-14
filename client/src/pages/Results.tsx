@@ -109,15 +109,18 @@ function buildPivotedChartData(
   };
 }
 
-function buildKirschBoundaryData(loadMagnitude: number, scf?: number) {
-  const computedBoundaryStress = typeof scf === "number" ? scf * loadMagnitude : undefined;
+function buildKirschBoundaryData(results: SolverResults, loadMagnitude: number) {
+  const computedByTheta = new Map<number, number>();
+  for (const sample of results.holeBoundarySamples) {
+    computedByTheta.set(Math.round(sample.thetaDeg), sample.sigmaThetaTheta);
+  }
 
   return Array.from({ length: 181 }, (_, theta) => {
     const radians = (theta * Math.PI) / 180;
     return {
       theta,
       analytical: loadMagnitude * (1 - 2 * Math.cos(2 * radians)),
-      computed: theta === 90 ? computedBoundaryStress : undefined,
+      computed: computedByTheta.get(theta),
     };
   });
 }
@@ -483,7 +486,7 @@ export default function Results() {
 
   const convergence = buildPivotedChartData(results.convergenceData, (point) => point.error);
   const scfConvergence = buildPivotedChartData(results.convergenceData, (point) => point.scf);
-  const kirschBoundaryData = buildKirschBoundaryData(analysis.loadMagnitude, results.kirschSCF);
+  const kirschBoundaryData = buildKirschBoundaryData(results, analysis.loadMagnitude);
   const stressProfile = buildStressProfile(results, analysis, stressField);
   const deflectionProfile = buildDeflectionProfile(results, deflectionField);
   const magnusAnalysis = results.magnusAnalysis;
@@ -569,7 +572,7 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <StressContourCanvas results={results} field={stressField} />
                 <p className="text-xs text-muted-foreground">
-                  Element-wise stress contours are drawn on the solved mesh using centroid stress recovery.
+                  Stress contours are drawn from transport-evaluated interior field samples and overlaid on the active mesh.
                 </p>
               </CardContent>
             </Card>
@@ -595,7 +598,7 @@ export default function Results() {
               <CardContent className="space-y-3">
                 <DeflectionContourCanvas results={results} field={deflectionField} />
                 <p className="text-xs text-muted-foreground">
-                  Deflection contours are averaged from nodal displacements and plotted over the active finite element mesh.
+                  Deflection contours are drawn from transport-evaluated field samples rather than element-centroid averaging.
                 </p>
               </CardContent>
             </Card>
@@ -656,7 +659,7 @@ export default function Results() {
             series={convergence.series}
             xLabel="Element count"
             yLabel="Error [%]"
-            footer="The seeded benchmark curves remain reference data; the current run is added as a separate series when available."
+            footer="Convergence points are generated from actual benchmark solves on successively refined meshes for both TK-FEM and standard Q4 FEM."
           />
           <ChartCard
             title="Stress concentration factor convergence"
@@ -683,7 +686,7 @@ export default function Results() {
             ]}
             xLabel="Theta [deg]"
             yLabel="Boundary stress [MPa]"
-            footer="The analytical curve uses sigma_theta_theta(a, theta) = sigma_inf * (1 - 2 cos 2 theta). The computed marker is the solver's approximate crown sample."
+            footer="The analytical curve uses sigma_theta_theta(a, theta) = sigma_inf * (1 - 2 cos 2 theta). The computed curve is sampled directly on the hole boundary."
           />
 
           <Card className="border-border bg-card">
