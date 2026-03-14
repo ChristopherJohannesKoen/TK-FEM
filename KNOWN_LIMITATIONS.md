@@ -7,7 +7,7 @@ The current solver now uses a transport-based, boundary-only TK assembly for the
 Current gaps:
 
 - the homogeneous isotropic Appendix A transport operators are now implemented for the benchmark solver family, but the broader Koenian geometry-connection treatment for curved, heterogeneous, or anisotropic media is still outside the current solver scope
-- the meshed path still approximates the circular hole with body-fitted polygonal edges; exact curved functionation is currently available only in the functionized single-domain benchmark path
+- the meshed quarter-hole benchmark now uses a curvilinear map with an exact circular hole boundary, but there is still no general curved CAD/NURBS meshing pipeline beyond the built-in benchmark geometry family
 - the frontend and backend currently implement the `TK-Q4-edge` style workflow; higher-order edge enrichments such as the `TK-Q8-edge` variant are not yet present
 - the convergence study is generated from actual in-app benchmark solves, but it is still limited to the built-in structured mesh family rather than an external Gmsh/photoelastic validation pipeline
 - the functionized single-domain mode is currently implemented for the built-in analytic geometries only; there is no general CAD/NURBS import and no arbitrary geometry functionation pipeline yet

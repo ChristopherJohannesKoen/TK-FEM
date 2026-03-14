@@ -303,6 +303,37 @@ function drawGeometryOutline(
   }
 }
 
+function drawQuarterHoleMask(
+  ctx: CanvasRenderingContext2D,
+  projector: ReturnType<typeof createProjector>,
+  outline: SolverGeometryPoint[],
+  options?: {
+    deformed?: boolean;
+    amplification?: number;
+  },
+) {
+  if (!outline.length) {
+    return;
+  }
+
+  const deformed = options?.deformed ?? false;
+  const amplification = options?.amplification ?? 1;
+  const origin = projector.toCanvas(0, 0);
+
+  ctx.beginPath();
+  ctx.moveTo(origin.x, origin.y);
+  outline.forEach((point) => {
+    const projected = projector.toCanvas(
+      point.x + (deformed ? point.ux * amplification : 0),
+      point.y + (deformed ? point.uy * amplification : 0),
+    );
+    ctx.lineTo(projected.x, projected.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = "hsl(222, 39%, 11%)";
+  ctx.fill();
+}
+
 export function getStressFieldLabel(field: StressField) {
   switch (field) {
     case "sxx":
@@ -381,10 +412,6 @@ export function StressContourCanvas({ results, field }: { results: SolverResults
         ctx.closePath();
         ctx.stroke();
       }
-      if (!elements.length && results.geometryOutline.length) {
-        ctx.strokeStyle = "rgba(255,255,255,0.28)";
-        drawGeometryOutline(ctx, projector, results.geometryOutline);
-      }
     } else {
       drawElementPolygons(
         ctx,
@@ -394,6 +421,15 @@ export function StressContourCanvas({ results, field }: { results: SolverResults
         (element) => stressMap.get(element.id)?.[field] ?? 0,
         range,
       );
+    }
+
+    if (results.geometryOutline.length) {
+      if (elements.length) {
+        drawQuarterHoleMask(ctx, projector, results.geometryOutline);
+      }
+      ctx.strokeStyle = elements.length ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.28)";
+      ctx.lineWidth = elements.length ? 1.2 : 1;
+      drawGeometryOutline(ctx, projector, results.geometryOutline);
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.84)";
@@ -459,10 +495,6 @@ export function DeflectionContourCanvas({ results, field }: { results: SolverRes
         ctx.closePath();
         ctx.stroke();
       }
-      if (!elements.length && results.geometryOutline.length) {
-        ctx.strokeStyle = "rgba(255,255,255,0.28)";
-        drawGeometryOutline(ctx, projector, results.geometryOutline);
-      }
     } else {
       drawElementPolygons(
         ctx,
@@ -478,6 +510,15 @@ export function DeflectionContourCanvas({ results, field }: { results: SolverRes
         },
         range,
       );
+    }
+
+    if (results.geometryOutline.length) {
+      if (elements.length) {
+        drawQuarterHoleMask(ctx, projector, results.geometryOutline);
+      }
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = elements.length ? 1.2 : 1;
+      drawGeometryOutline(ctx, projector, results.geometryOutline);
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.84)";
@@ -570,6 +611,28 @@ export function DeformedShapeCanvas({ results, field }: { results: SolverResults
         ctx.strokeStyle = "rgba(255,255,255,0.32)";
         ctx.lineWidth = 1;
         ctx.stroke();
+      }
+
+      if (results.geometryOutline.length) {
+        drawQuarterHoleMask(ctx, projector, results.geometryOutline);
+        drawQuarterHoleMask(ctx, projector, results.geometryOutline, {
+          deformed: true,
+          amplification,
+        });
+        ctx.strokeStyle = "rgba(255,255,255,0.22)";
+        ctx.lineWidth = 1;
+        drawGeometryOutline(ctx, projector, results.geometryOutline);
+        drawGeometryOutline(ctx, projector, results.geometryOutline, {
+          deformed: true,
+          amplification,
+          valueForPoint: (point) => {
+            if (field === "uMagnitude") {
+              return Math.hypot(point.ux, point.uy);
+            }
+            return point[field];
+          },
+          range,
+        });
       }
     } else {
       ctx.strokeStyle = "rgba(255,255,255,0.16)";

@@ -19,11 +19,33 @@ interface Node {
   y: number;
 }
 
+interface QuarterHoleElementGeometry {
+  type: "quarter_hole";
+  W: number;
+  H: number;
+  holeRadius: number;
+  thetaCorner: number;
+  thetaStart: number;
+  thetaEnd: number;
+  radialStart: number;
+  radialEnd: number;
+}
+
+interface ElementPointData {
+  x: number;
+  y: number;
+  dxDxi: number;
+  dyDxi: number;
+  dxDeta: number;
+  dyDeta: number;
+}
+
 interface Element {
   id: number;
   nodeIds: [number, number, number, number];
   center: Vec2;
   characteristicSize: number;
+  geometry?: QuarterHoleElementGeometry;
 }
 
 interface Mesh {
@@ -64,6 +86,7 @@ interface TKSolveArtifacts {
   stresses: SolverResults["stresses"];
   fieldSamples: SolverFieldSample[];
   holeBoundarySamples: SolverBoundarySample[];
+  geometryOutline: SolverResults["geometryOutline"];
   elementRecoveries: Map<number, ElementRecovery>;
   maxDisp: number;
   maxVonMises: number;
@@ -340,30 +363,121 @@ function quadShapeFunctionDerivatives(xi: number, eta: number) {
   };
 }
 
-function mapQuadPoint(element: Element, nodes: Node[], xi: number, eta: number) {
-  const shape = quadShapeFunctions(xi, eta);
-  const coordinates = element.nodeIds.map((nodeId) => nodes[nodeId]);
+function interpolateReference(start: number, end: number, coordinate: number) {
+  return 0.5 * ((1 - coordinate) * start + (1 + coordinate) * end);
+}
+
+function outerBoundaryPoint(W: number, H: number, thetaCorner: number, theta: number): Vec2 {
+  const tolerance = 1e-9;
+  if (theta <= thetaCorner + tolerance) {
+    return Math.abs(theta) < tolerance ? [W, 0] : [W, W * Math.tan(theta)];
+  }
+  return Math.abs(theta - Math.PI / 2) < tolerance ? [0, H] : [H / Math.tan(theta), H];
+}
+
+function outerBoundaryDerivative(W: number, H: number, thetaCorner: number, theta: number): Vec2 {
+  const tolerance = 1e-9;
+  if (theta <= thetaCorner + tolerance) {
+    if (Math.abs(theta) < tolerance) {
+      return [0, W];
+    }
+    return [0, W / (Math.cos(theta) * Math.cos(theta))];
+  }
+  if (Math.abs(theta - Math.PI / 2) < tolerance) {
+    return [-H, 0];
+  }
+  return [-H / (Math.sin(theta) * Math.sin(theta)), 0];
+}
+
+function mapQuarterHoleByParameters(
+  W: number,
+  H: number,
+  holeRadius: number,
+  thetaCorner: number,
+  radialFraction: number,
+  theta: number,
+): Vec2 {
+  const inner: Vec2 = [holeRadius * Math.cos(theta), holeRadius * Math.sin(theta)];
+  const outer = outerBoundaryPoint(W, H, thetaCorner, theta);
+  return [
+    inner[0] + radialFraction * (outer[0] - inner[0]),
+    inner[1] + radialFraction * (outer[1] - inner[1]),
+  ];
+}
+
+function quarterHolePointAndDerivatives(geometry: QuarterHoleElementGeometry, xi: number, eta: number): ElementPointData {
+  const radialFraction = interpolateReference(geometry.radialStart, geometry.radialEnd, xi);
+  const theta = interpolateReference(geometry.thetaStart, geometry.thetaEnd, eta);
+  const dRadialDxi = 0.5 * (geometry.radialEnd - geometry.radialStart);
+  const dThetaDeta = 0.5 * (geometry.thetaEnd - geometry.thetaStart);
+  const inner: Vec2 = [geometry.holeRadius * Math.cos(theta), geometry.holeRadius * Math.sin(theta)];
+  const innerDerivative: Vec2 = [-geometry.holeRadius * Math.sin(theta), geometry.holeRadius * Math.cos(theta)];
+  const outer = outerBoundaryPoint(geometry.W, geometry.H, geometry.thetaCorner, theta);
+  const outerDerivative = outerBoundaryDerivative(geometry.W, geometry.H, geometry.thetaCorner, theta);
+  const radialDirection: Vec2 = [outer[0] - inner[0], outer[1] - inner[1]];
+  const angularDirection: Vec2 = [
+    innerDerivative[0] + radialFraction * (outerDerivative[0] - innerDerivative[0]),
+    innerDerivative[1] + radialFraction * (outerDerivative[1] - innerDerivative[1]),
+  ];
+
   return {
-    x: shape.reduce((sum, value, index) => sum + value * coordinates[index].x, 0),
-    y: shape.reduce((sum, value, index) => sum + value * coordinates[index].y, 0),
+    x: inner[0] + radialFraction * radialDirection[0],
+    y: inner[1] + radialFraction * radialDirection[1],
+    dxDxi: radialDirection[0] * dRadialDxi,
+    dyDxi: radialDirection[1] * dRadialDxi,
+    dxDeta: angularDirection[0] * dThetaDeta,
+    dyDeta: angularDirection[1] * dThetaDeta,
   };
 }
 
-function quadJacobian(element: Element, nodes: Node[], xi: number, eta: number) {
+function bilinearPointAndDerivatives(element: Element, nodes: Node[], xi: number, eta: number): ElementPointData {
+  const shape = quadShapeFunctions(xi, eta);
   const { dNdxi, dNdeta } = quadShapeFunctionDerivatives(xi, eta);
   const coordinates = element.nodeIds.map((nodeId) => nodes[nodeId]);
-  let j11 = 0;
-  let j12 = 0;
-  let j21 = 0;
-  let j22 = 0;
+  let x = 0;
+  let y = 0;
+  let dxDxi = 0;
+  let dyDxi = 0;
+  let dxDeta = 0;
+  let dyDeta = 0;
 
-  for (let i = 0; i < 4; i++) {
-    j11 += dNdxi[i] * coordinates[i].x;
-    j12 += dNdxi[i] * coordinates[i].y;
-    j21 += dNdeta[i] * coordinates[i].x;
-    j22 += dNdeta[i] * coordinates[i].y;
+  for (let index = 0; index < coordinates.length; index++) {
+    x += shape[index] * coordinates[index].x;
+    y += shape[index] * coordinates[index].y;
+    dxDxi += dNdxi[index] * coordinates[index].x;
+    dyDxi += dNdxi[index] * coordinates[index].y;
+    dxDeta += dNdeta[index] * coordinates[index].x;
+    dyDeta += dNdeta[index] * coordinates[index].y;
   }
 
+  return {
+    x,
+    y,
+    dxDxi,
+    dyDxi,
+    dxDeta,
+    dyDeta,
+  };
+}
+
+function elementPointAndDerivatives(element: Element, nodes: Node[], xi: number, eta: number) {
+  if (element.geometry?.type === "quarter_hole") {
+    return quarterHolePointAndDerivatives(element.geometry, xi, eta);
+  }
+  return bilinearPointAndDerivatives(element, nodes, xi, eta);
+}
+
+function mapQuadPoint(element: Element, nodes: Node[], xi: number, eta: number) {
+  const point = elementPointAndDerivatives(element, nodes, xi, eta);
+  return { x: point.x, y: point.y };
+}
+
+function quadJacobian(element: Element, nodes: Node[], xi: number, eta: number) {
+  const point = elementPointAndDerivatives(element, nodes, xi, eta);
+  const j11 = point.dxDxi;
+  const j12 = point.dyDxi;
+  const j21 = point.dxDeta;
+  const j22 = point.dyDeta;
   return { j11, j12, j21, j22, determinant: j11 * j22 - j12 * j21 };
 }
 
@@ -380,19 +494,23 @@ function boundaryShapeMatrix(edgeIndex: number, s: number): DenseMatrix {
 }
 
 function edgePointAndNormal(element: Element, nodes: Node[], edgeIndex: number, s: number) {
-  const [nodeAIndex, nodeBIndex] = EDGE_NODE_INDICES[edgeIndex];
-  const nodeA = nodes[element.nodeIds[nodeAIndex]];
-  const nodeB = nodes[element.nodeIds[nodeBIndex]];
-  const x = 0.5 * ((1 - s) * nodeA.x + (1 + s) * nodeB.x);
-  const y = 0.5 * ((1 - s) * nodeA.y + (1 + s) * nodeB.y);
-  const tx = nodeB.x - nodeA.x;
-  const ty = nodeB.y - nodeA.y;
-  const length = Math.hypot(tx, ty);
+  const reference =
+    edgeIndex === 0
+      ? { xi: s, eta: -1, dXiDs: 1, dEtaDs: 0 }
+      : edgeIndex === 1
+        ? { xi: 1, eta: s, dXiDs: 0, dEtaDs: 1 }
+        : edgeIndex === 2
+          ? { xi: -s, eta: 1, dXiDs: -1, dEtaDs: 0 }
+          : { xi: -1, eta: -s, dXiDs: 0, dEtaDs: -1 };
+  const point = elementPointAndDerivatives(element, nodes, reference.xi, reference.eta);
+  const tx = point.dxDxi * reference.dXiDs + point.dxDeta * reference.dEtaDs;
+  const ty = point.dyDxi * reference.dXiDs + point.dyDeta * reference.dEtaDs;
+  const measure = Math.hypot(tx, ty);
   return {
-    x,
-    y,
-    length,
-    normal: [ty / Math.max(length, 1e-12), -tx / Math.max(length, 1e-12)] as Vec2,
+    x: point.x,
+    y: point.y,
+    measure,
+    normal: [ty / Math.max(measure, 1e-12), -tx / Math.max(measure, 1e-12)] as Vec2,
   };
 }
 
@@ -410,6 +528,9 @@ function classifyBoundaryEdge(
   params: Pick<SolverParams, "domainType" | "W" | "H" | "holeRadius">,
 ) {
   const tolerance = 1e-6;
+  if (element.geometry?.type === "quarter_hole" && edgeIndex === 3 && element.geometry.radialStart <= 1e-12) {
+    return "hole";
+  }
   const [nodeAIndex, nodeBIndex] = EDGE_NODE_INDICES[edgeIndex];
   const nodeA = nodes[element.nodeIds[nodeAIndex]];
   const nodeB = nodes[element.nodeIds[nodeBIndex]];
@@ -491,19 +612,21 @@ function displacementBasisAtPoint(point: Vec2, center: Vec2, transport: Transpor
 }
 
 function buildElementCenter(element: Element, nodes: Node[]): Vec2 {
-  const coordinates = element.nodeIds.map((nodeId) => nodes[nodeId]);
-  return [
-    coordinates.reduce((sum, node) => sum + node.x, 0) / 4,
-    coordinates.reduce((sum, node) => sum + node.y, 0) / 4,
-  ];
+  const point = elementPointAndDerivatives(element, nodes, 0, 0);
+  return [point.x, point.y];
+}
+
+function edgeLength(element: Element, nodes: Node[], edgeIndex: number) {
+  let length = 0;
+  for (let gpIndex = 0; gpIndex < LINE_GAUSS_POINTS.length; gpIndex++) {
+    const point = edgePointAndNormal(element, nodes, edgeIndex, LINE_GAUSS_POINTS[gpIndex]);
+    length += LINE_GAUSS_WEIGHTS[gpIndex] * point.measure;
+  }
+  return length;
 }
 
 function characteristicSize(element: Element, nodes: Node[]) {
-  const lengths = EDGE_NODE_INDICES.map(([a, b]) => {
-    const nodeA = nodes[element.nodeIds[a]];
-    const nodeB = nodes[element.nodeIds[b]];
-    return Math.hypot(nodeB.x - nodeA.x, nodeB.y - nodeA.y);
-  });
+  const lengths = EDGE_NODE_INDICES.map((_, edgeIndex) => edgeLength(element, nodes, edgeIndex));
   return lengths.reduce((sum, value) => sum + value, 0) / lengths.length;
 }
 
@@ -557,26 +680,13 @@ function generateQuarterHoleMesh(W: number, H: number, holeRadius: number, nx: n
   const nodeIndex = new Map<string, number>();
   const radialFractions = Array.from({ length: ny + 1 }, (_, index) => Math.pow(index / ny, 1.25));
 
-  function outerPoint(theta: number): Vec2 {
-    const tolerance = 1e-9;
-    if (theta <= thetaCorner + tolerance) {
-      return Math.abs(theta) < tolerance ? [W, 0] : [W, W * Math.tan(theta)];
-    }
-    return Math.abs(theta - Math.PI / 2) < tolerance ? [0, H] : [H / Math.tan(theta), H];
-  }
-
   for (let radialIndex = 0; radialIndex <= ny; radialIndex++) {
     for (let angleIndex = 0; angleIndex < angles.length; angleIndex++) {
       const theta = angles[angleIndex];
-      const inner: Vec2 = [holeRadius * Math.cos(theta), holeRadius * Math.sin(theta)];
-      const outer = outerPoint(theta);
       const fraction = radialFractions[radialIndex];
+      const [x, y] = mapQuarterHoleByParameters(W, H, holeRadius, thetaCorner, fraction, theta);
       const id = nodes.length;
-      nodes.push({
-        id,
-        x: inner[0] + fraction * (outer[0] - inner[0]),
-        y: inner[1] + fraction * (outer[1] - inner[1]),
-      });
+      nodes.push({ id, x, y });
       nodeIndex.set(`${radialIndex}:${angleIndex}`, id);
     }
   }
@@ -593,6 +703,17 @@ function generateQuarterHoleMesh(W: number, H: number, holeRadius: number, nx: n
         ],
         center: [0, 0],
         characteristicSize: 0,
+        geometry: {
+          type: "quarter_hole",
+          W,
+          H,
+          holeRadius,
+          thetaCorner,
+          thetaStart: angles[angleIndex],
+          thetaEnd: angles[angleIndex + 1],
+          radialStart: radialFractions[radialIndex],
+          radialEnd: radialFractions[radialIndex + 1],
+        },
       };
       provisional.center = buildElementCenter(provisional, nodes);
       provisional.characteristicSize = characteristicSize(provisional, nodes);
@@ -647,7 +768,7 @@ function buildTKElementMatrices(
         constitutive,
       );
       const N = boundaryShapeMatrix(edgeIndex, s);
-      const scale = weight * edgeData.length / 2;
+      const scale = weight * edgeData.measure;
       addScaled(Ke, multiplyDense(transpose(N), multiplyDense(basis.Q, boundaryProjection)), scale);
 
       if (traction) {
@@ -769,7 +890,7 @@ function assembleStandardSystem(
         const edgeData = edgePointAndNormal(element, mesh.nodes, edgeIndex, s);
         const N = boundaryShapeMatrix(edgeIndex, s);
         const contribution = multiplyDenseVector(transpose(N), traction);
-        const scale = weight * edgeData.length / 2;
+        const scale = weight * edgeData.measure;
         for (let i = 0; i < dofs.length; i++) {
           F[dofs[i]] += contribution[i] * scale;
         }
@@ -1070,6 +1191,56 @@ function buildHoleBoundarySamplesStandard(
   return samples.sort((left, right) => left.thetaDeg - right.thetaDeg);
 }
 
+function buildHoleGeometryOutlineTK(
+  mesh: Mesh,
+  params: Pick<SolverParams, "domainType" | "holeRadius">,
+  displacements: number[],
+  recoveries: Map<number, ElementRecovery>,
+  transport: TransportOperators,
+  constitutive: ConstitutiveData,
+) {
+  if (params.domainType !== "circle_hole") {
+    return [] as SolverResults["geometryOutline"];
+  }
+
+  const holeElements = mesh.elements
+    .filter((element) => element.geometry?.type === "quarter_hole" && element.geometry.radialStart <= 1e-12)
+    .sort((left, right) => (left.geometry?.thetaStart ?? 0) - (right.geometry?.thetaStart ?? 0));
+  const outline: SolverResults["geometryOutline"] = [];
+
+  holeElements.forEach((element, elementIndex) => {
+    const recovery = recoveries.get(element.id);
+    const geometry = element.geometry;
+    if (!recovery || geometry?.type !== "quarter_hole") {
+      return;
+    }
+
+    const sampleCount = Math.max(8, Math.ceil(((geometry.thetaEnd - geometry.thetaStart) / (Math.PI / 2)) * 24));
+    for (let sampleIndex = 0; sampleIndex <= sampleCount; sampleIndex++) {
+      if (elementIndex > 0 && sampleIndex === 0) {
+        continue;
+      }
+      const eta = -1 + (2 * sampleIndex) / Math.max(sampleCount, 1);
+      const point = elementPointAndDerivatives(element, mesh.nodes, -1, eta);
+      const theta = Math.atan2(point.y, point.x);
+      const field = evaluateTKFieldAtPoint(recovery, displacements, transport, constitutive, point.x, point.y);
+      const arcLength = params.holeRadius * theta;
+      outline.push({
+        x: point.x,
+        y: point.y,
+        ux: field.ux,
+        uy: field.uy,
+        boundaryType: "hole",
+        curveLabel: "Exact hole boundary",
+        arcLength,
+        normalizedArcLength: theta / (Math.PI / 2),
+      });
+    }
+  });
+
+  return outline;
+}
+
 function computeStressErrorNormTK(
   mesh: Mesh,
   params: Pick<SolverParams, "holeRadius" | "loadMag">,
@@ -1160,6 +1331,7 @@ function solveTKCase(
 
   const fieldSamples = includeFieldSamples ? buildFieldSamples(mesh, displacements, recoveries, transport, constitutive) : [];
   const holeBoundarySamples = buildHoleBoundarySamplesTK(mesh, params, displacements, recoveries, transport, constitutive);
+  const geometryOutline = buildHoleGeometryOutlineTK(mesh, params, displacements, recoveries, transport, constitutive);
   const kirschSCF = params.domainType === "circle_hole" && params.loadMag > 0
     ? Math.max(...holeBoundarySamples.map((sample) => sample.sigmaThetaTheta / params.loadMag), 0)
     : undefined;
@@ -1172,6 +1344,7 @@ function solveTKCase(
     stresses,
     fieldSamples,
     holeBoundarySamples,
+    geometryOutline,
     elementRecoveries: recoveries,
     maxDisp: Math.max(...nodes.map((node) => node.uMagnitude), ...fieldSamples.map((sample) => sample.uMagnitude), 0),
     maxVonMises: Math.max(...stresses.map((stress) => stress.vonMises), ...fieldSamples.map((sample) => sample.vonMises), 0),
@@ -1342,7 +1515,7 @@ export async function runTKFEM(params: SolverParams): Promise<SolverResults> {
     fieldSamples: tk.fieldSamples,
     holeBoundarySamples: tk.holeBoundarySamples,
     boundaryFrames: [],
-    geometryOutline: [],
+    geometryOutline: tk.geometryOutline,
     functionizedDiagnostics: null,
     maxDisp: tk.maxDisp,
     maxVonMises: tk.maxVonMises,

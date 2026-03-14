@@ -32,6 +32,7 @@ If Python or `sympy` is not available, the backend falls back to a numeric Magnu
 
 Current functionized coverage:
 
+- the meshed `circle_hole` benchmark now uses a curvilinear quarter-hole element map with an exact circular hole boundary in the built-in benchmark geometry
 - `rectangle` with smooth boundary loading uses the boundary-collocation single-domain solver
 - `circle_hole` with `uniform_tension` uses the functionized single-domain boundary solver and reports against the exact Kirsch benchmark for validation
 
